@@ -1,0 +1,30 @@
+version: 2
+updates:
+  # NuGet packages referenced by AccessibleLiveCaptions.csproj
+  # (System.Speech, NAudio, Whisper.net, Whisper.net.Runtime).
+  - package-ecosystem: nuget
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: deps
+    groups:
+      # Whisper.net and Whisper.net.Runtime must move together, so bump them
+      # in a single PR rather than two that would leave a version mismatch.
+      whisper:
+        patterns:
+          - "Whisper.net*"
+
+  # Versions of the actions used in .github/workflows/*.yml
+  # (actions/checkout, actions/setup-dotnet, actions/upload-artifact).
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns:
+          - "*"

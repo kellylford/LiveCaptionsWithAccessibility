@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Windows;
@@ -42,20 +43,6 @@ public partial class MainWindow : Window
         new("Toggle screen-reader announcements", nameof(ToggleAnnounceCommand), typeof(MainWindow),
             [new KeyGesture(Key.F8)]);
 
-    public static readonly RoutedUICommand FocusTranscriptCommand =
-        new("Go to transcript", nameof(FocusTranscriptCommand), typeof(MainWindow),
-            [new KeyGesture(Key.T, ModifierKeys.Control)]);
-
-    // F6 / Shift+F6 cycle focus between the panes (toolbars + transcript), the
-    // standard Windows shortcut for moving between regions of a window.
-    public static readonly RoutedUICommand CyclePaneCommand =
-        new("Next pane", nameof(CyclePaneCommand), typeof(MainWindow),
-            [new KeyGesture(Key.F6)]);
-
-    public static readonly RoutedUICommand CyclePaneBackCommand =
-        new("Previous pane", nameof(CyclePaneBackCommand), typeof(MainWindow),
-            [new KeyGesture(Key.F6, ModifierKeys.Shift)]);
-
     // ---- State ----------------------------------------------------------------
     private readonly ObservableCollection<TranscriptLine> _lines = new();
     private ICaptionSource? _captions;
@@ -63,11 +50,24 @@ public partial class MainWindow : Window
     private const double MinFont = 14;
     private const double MaxFont = 48;
 
+    // Selected application for per-app system-audio capture (null = whole system mix).
+    private int? _selectedAppPid;
+    private string _selectedAppName = "";
+
     public MainWindow()
     {
         InitializeComponent();
 
         TranscriptList.ItemsSource = _lines;
+
+        // Test aid: set LIVECAPTIONS_SEED=1 to prefill the transcript so keyboard
+        // navigation can be exercised without a live audio source. No effect otherwise.
+        if (Environment.GetEnvironmentVariable("LIVECAPTIONS_SEED") == "1")
+        {
+            for (int i = 1; i <= 8; i++)
+                _lines.Add(new TranscriptLine($"Sample caption line number {i}.",
+                    DateTime.Now.ToString("HH:mm:ss"), ShowTimestamps));
+        }
 
         CommandBindings.Add(new CommandBinding(ToggleListenCommand, (_, _) => ToggleListen()));
         CommandBindings.Add(new CommandBinding(ClearCommand, (_, _) => ClearTranscript()));
@@ -76,12 +76,17 @@ public partial class MainWindow : Window
         CommandBindings.Add(new CommandBinding(IncreaseFontCommand, (_, _) => AdjustFont(+2)));
         CommandBindings.Add(new CommandBinding(DecreaseFontCommand, (_, _) => AdjustFont(-2)));
         CommandBindings.Add(new CommandBinding(ToggleAnnounceCommand, (_, _) => MenuAnnounce.IsChecked = !MenuAnnounce.IsChecked));
-        CommandBindings.Add(new CommandBinding(FocusTranscriptCommand, (_, _) => FocusTranscript()));
-        CommandBindings.Add(new CommandBinding(CyclePaneCommand, (_, _) => CyclePane(forward: true)));
-        CommandBindings.Add(new CommandBinding(CyclePaneBackCommand, (_, _) => CyclePane(forward: false)));
 
-        // When focus reaches the list container itself (via Tab or F6), push it onto an item.
+        // The transcript is the only focusable control. When focus reaches the list
+        // container itself, push it onto an item so the arrows work immediately.
         TranscriptList.GotKeyboardFocus += TranscriptList_GotKeyboardFocus;
+
+        // Tab does nothing in this app: the menu bar is reached with Alt/F10 and the
+        // transcript is the only content, so swallow Tab/Shift+Tab entirely.
+        PreviewKeyDown += (_, e) => { if (e.Key == Key.Tab) e.Handled = true; };
+
+        // Focus lands on the transcript when the window opens.
+        Loaded += (_, _) => FocusTranscriptStart();
 
         Closed += (_, _) => _captions?.Dispose();
     }
@@ -113,15 +118,16 @@ public partial class MainWindow : Window
 
     private ICaptionSource CreateSelectedSource()
     {
-        bool whisper = EngineCombo.SelectedIndex == 0;
-        if (!whisper)
+        if (!EngWhisper.IsChecked)
             return new SystemSpeechCaptionSource(); // SAPI: microphone only
 
-        bool systemAudio = SourceCombo.SelectedIndex == 1;
-        IAudioCaptureSource capture = systemAudio
-            ? new SystemAudioCaptureSource()
-            : new MicrophoneCaptureSource();
-        return new WhisperCaptionSource(capture);
+        if (!SrcSystem.IsChecked)
+            return new WhisperCaptionSource(new MicrophoneCaptureSource());
+
+        // System audio: a specific application, or the whole mix.
+        if (_selectedAppPid is int pid)
+            return new WhisperCaptionSource(new ProcessAudioCaptureSource(pid, _selectedAppName));
+        return new WhisperCaptionSource(new SystemAudioCaptureSource());
     }
 
     private void OnStateChanged(object? sender, CaptionStateChangedEventArgs e)
@@ -129,14 +135,10 @@ public partial class MainWindow : Window
         Dispatcher.Invoke(() =>
         {
             var listening = e.State is CaptionState.Listening or CaptionState.Starting;
-            ListenButton.Content = listening ? "_Stop listening" : "_Start listening";
             MenuToggleListen.Header = listening ? "_Stop listening" : "_Start listening";
-            ListenButton.SetValue(System.Windows.Automation.AutomationProperties.NameProperty,
-                listening ? "Stop listening" : "Start listening");
 
-            // Lock the engine/source pickers while a session is active.
-            EngineCombo.IsEnabled = !listening;
-            SourceCombo.IsEnabled = !listening && EngineCombo.SelectedIndex == 0;
+            // Lock the audio source/engine/application choices while a session is active.
+            MenuAudio.IsEnabled = !listening;
 
             if (!string.IsNullOrWhiteSpace(e.Message))
                 SetStatus(e.Message!);
@@ -149,20 +151,100 @@ public partial class MainWindow : Window
         });
     }
 
-    private void EngineCombo_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    // ---- Audio menu (source / engine / application) ---------------------------
+    private void Source_Click(object sender, RoutedEventArgs e)
     {
-        if (!IsLoaded)
-            return;
+        bool system = ReferenceEquals(sender, SrcSystem);
+        SrcSystem.IsChecked = system;
+        SrcMic.IsChecked = !system;
 
-        // Windows SAPI can only listen to the microphone; Whisper can also take system audio.
-        bool whisper = EngineCombo.SelectedIndex == 0;
-        if (!whisper)
-            SourceCombo.SelectedIndex = 0;
-        SourceCombo.IsEnabled = whisper;
+        // System audio needs the Whisper engine (SAPI is microphone-only).
+        if (system && !EngWhisper.IsChecked)
+            SelectEngine(whisper: true);
+
+        UpdateAudioMenuState();
+        SetStatus(system
+            ? "System audio. Use Audio ▸ Application to capture one app, or leave it on all audio."
+            : "Microphone selected.");
+    }
+
+    private void Engine_Click(object sender, RoutedEventArgs e) =>
+        SelectEngine(whisper: ReferenceEquals(sender, EngWhisper));
+
+    private void SelectEngine(bool whisper)
+    {
+        EngWhisper.IsChecked = whisper;
+        EngSapi.IsChecked = !whisper;
+
+        // SAPI can only caption the microphone.
+        if (!whisper && SrcSystem.IsChecked)
+        {
+            SrcSystem.IsChecked = false;
+            SrcMic.IsChecked = true;
+        }
+
+        UpdateAudioMenuState();
         SetStatus(whisper
             ? "Whisper engine: accurate, on-device. Microphone or system audio."
             : "Windows speech engine: instant, microphone only.");
     }
+
+    private void UpdateAudioMenuState() =>
+        MenuApplication.IsEnabled = EngWhisper.IsChecked && SrcSystem.IsChecked;
+
+    // Rebuild the Application submenu each time it opens so newly launched apps appear.
+    private void MenuApplication_SubmenuOpened(object sender, RoutedEventArgs e)
+    {
+        MenuApplication.Items.Clear();
+        MenuApplication.Items.Add(MakeAppItem(null, "(All system audio)", ""));
+
+        foreach (var p in Process.GetProcesses())
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(p.MainWindowTitle))
+                    continue;
+                var title = p.MainWindowTitle.Length > 40 ? p.MainWindowTitle[..40] + "…" : p.MainWindowTitle;
+                MenuApplication.Items.Add(MakeAppItem(p.Id, $"{p.ProcessName} — {title}", p.ProcessName));
+            }
+            catch
+            {
+                // Process exited or access denied; skip it.
+            }
+        }
+    }
+
+    private MenuItem MakeAppItem(int? pid, string header, string name)
+    {
+        var item = new MenuItem
+        {
+            Header = header,
+            IsCheckable = true,
+            IsChecked = pid == _selectedAppPid,
+            Tag = new AppTag(pid, name)
+        };
+        item.Click += App_Click;
+        return item;
+    }
+
+    private void App_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: AppTag tag })
+            return;
+
+        _selectedAppPid = tag.Pid;
+        _selectedAppName = tag.Name;
+
+        foreach (var obj in MenuApplication.Items)
+            if (obj is MenuItem mi)
+                mi.IsChecked = ReferenceEquals(mi, sender);
+
+        SetStatus(tag.Pid is null
+            ? "Capturing all system audio."
+            : $"Capturing audio from {tag.Name}.");
+    }
+
+    private sealed record AppTag(int? Pid, string Name);
 
     // ---- Recognition results --------------------------------------------------
     private void OnPartial(object? sender, CaptionTextEventArgs e)
@@ -245,8 +327,6 @@ public partial class MainWindow : Window
         SetStatus($"Caption text size: {_captionFontSize:0} point.");
     }
 
-    private void FocusTranscript() => FocusTranscriptStart();
-
     // Land on the item the user was last on, or the first line if they haven't moved
     // within the list yet ("start of the list if focus was not moved by the user").
     private void FocusTranscriptStart()
@@ -275,25 +355,6 @@ public partial class MainWindow : Window
     {
         if (ReferenceEquals(e.NewFocus, TranscriptList))
             Dispatcher.BeginInvoke(new Action(FocusTranscriptStart));
-    }
-
-    // F6 / Shift+F6: cycle focus across the toolbars and the transcript.
-    private void CyclePane(bool forward)
-    {
-        FrameworkElement[] panes = [ActionToolBar, SettingsToolBar, TranscriptList];
-        int current = Array.FindIndex(panes, p => p.IsKeyboardFocusWithin);
-        int target = current < 0
-            ? 0
-            : (current + (forward ? 1 : panes.Length - 1)) % panes.Length;
-        FocusPane(panes[target]);
-    }
-
-    private void FocusPane(FrameworkElement pane)
-    {
-        if (ReferenceEquals(pane, TranscriptList))
-            FocusTranscriptStart();
-        else
-            pane.MoveFocus(new TraversalRequest(FocusNavigationDirection.First));
     }
 
     // ---- View toggles ---------------------------------------------------------

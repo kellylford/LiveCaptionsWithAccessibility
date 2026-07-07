@@ -64,6 +64,25 @@
                           Command="{x:Static local:MainWindow.SaveCommand}"
                           InputGestureText="Ctrl+S" />
             </MenuItem>
+
+            <MenuItem x:Name="MenuAudio" Header="_Audio">
+                <MenuItem Header="_Source">
+                    <MenuItem x:Name="SrcMic" Header="_Microphone"
+                              IsCheckable="True" IsChecked="True" Click="Source_Click" />
+                    <MenuItem x:Name="SrcSystem" Header="S_ystem audio (what you hear)"
+                              IsCheckable="True" Click="Source_Click" />
+                </MenuItem>
+                <MenuItem x:Name="MenuApplication" Header="A_pplication" IsEnabled="False"
+                          SubmenuOpened="MenuApplication_SubmenuOpened" />
+                <Separator />
+                <MenuItem Header="_Engine">
+                    <MenuItem x:Name="EngWhisper" Header="_Whisper — accurate, on-device"
+                              IsCheckable="True" IsChecked="True" Click="Engine_Click" />
+                    <MenuItem x:Name="EngSapi" Header="Windows s_peech — instant, mic only"
+                              IsCheckable="True" Click="Engine_Click" />
+                </MenuItem>
+            </MenuItem>
+
             <MenuItem Header="_View">
                 <MenuItem Header="_Larger text"
                           Command="{x:Static local:MainWindow.IncreaseFontCommand}"
@@ -79,79 +98,8 @@
                           IsCheckable="True" IsChecked="True"
                           Checked="Announce_Changed" Unchecked="Announce_Changed"
                           InputGestureText="F8" />
-                <MenuItem Header="_Go to transcript"
-                          Command="{x:Static local:MainWindow.FocusTranscriptCommand}"
-                          InputGestureText="Ctrl+T" />
             </MenuItem>
         </Menu>
-
-        <!-- ==================== Action toolbar ====================
-             A real ToolBar is a single tab stop; Left/Right arrows move between its
-             buttons. IsLocked hides the drag gripper. F6 cycles between this toolbar,
-             the settings toolbar, and the transcript (handled in code-behind). -->
-        <ToolBarTray DockPanel.Dock="Top" IsLocked="True"
-                     Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}">
-            <ToolBar x:Name="ActionToolBar" KeyboardNavigation.TabNavigation="Once"
-                     AutomationProperties.Name="Caption controls"
-                     ToolBarTray.IsLocked="True">
-                <Button x:Name="ListenButton"
-                        Content="_Start listening"
-                        Command="{x:Static local:MainWindow.ToggleListenCommand}"
-                        Padding="14,6" MinWidth="150" FontWeight="Bold"
-                        AutomationProperties.Name="Start listening"
-                        AutomationProperties.HelpText="Starts or stops live captioning. Shortcut Control R." />
-                <Separator />
-                <Button Content="Cl_ear"
-                        Command="{x:Static local:MainWindow.ClearCommand}"
-                        Padding="12,6"
-                        AutomationProperties.Name="Clear transcript" />
-                <Button Content="C_opy all"
-                        Command="{x:Static local:MainWindow.CopyAllCommand}"
-                        Padding="12,6"
-                        AutomationProperties.Name="Copy entire transcript" />
-                <Button Content="Sa_ve…"
-                        Command="{x:Static local:MainWindow.SaveCommand}"
-                        Padding="12,6"
-                        AutomationProperties.Name="Save transcript to a text file" />
-                <Separator />
-                <Button Content="A−"
-                        Command="{x:Static local:MainWindow.DecreaseFontCommand}"
-                        Padding="12,6"
-                        AutomationProperties.Name="Smaller text" />
-                <Button Content="A+"
-                        Command="{x:Static local:MainWindow.IncreaseFontCommand}"
-                        Padding="12,6"
-                        AutomationProperties.Name="Larger text" />
-            </ToolBar>
-        </ToolBarTray>
-
-        <!-- ==================== Settings toolbar (audio source & engine) ==================== -->
-        <ToolBarTray DockPanel.Dock="Top" IsLocked="True"
-                     Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}">
-            <ToolBar x:Name="SettingsToolBar" KeyboardNavigation.TabNavigation="Once"
-                     AutomationProperties.Name="Audio source and engine"
-                     ToolBarTray.IsLocked="True">
-                <Label Content="_Audio source:" Target="{Binding ElementName=SourceCombo}"
-                       VerticalAlignment="Center" />
-                <ComboBox x:Name="SourceCombo" MinWidth="230" Margin="4,0,16,0"
-                          VerticalAlignment="Center" SelectedIndex="0"
-                          AutomationProperties.Name="Audio source"
-                          AutomationProperties.HelpText="Choose whether to caption your microphone or all audio playing on this PC.">
-                    <ComboBoxItem Content="Microphone" />
-                    <ComboBoxItem Content="System audio (what you hear)" />
-                </ComboBox>
-                <Label Content="_Engine:" Target="{Binding ElementName=EngineCombo}"
-                       VerticalAlignment="Center" />
-                <ComboBox x:Name="EngineCombo" MinWidth="260" Margin="4,0,0,0"
-                          VerticalAlignment="Center" SelectedIndex="0"
-                          SelectionChanged="EngineCombo_SelectionChanged"
-                          AutomationProperties.Name="Speech engine"
-                          AutomationProperties.HelpText="Whisper is accurate and on-device. Windows speech is instant but microphone only.">
-                    <ComboBoxItem Content="Whisper — accurate, on-device" />
-                    <ComboBoxItem Content="Windows speech — instant, mic only" />
-                </ComboBox>
-            </ToolBar>
-        </ToolBarTray>
 
         <!-- ==================== Status bar (live region) ==================== -->
         <Border DockPanel.Dock="Bottom" Padding="10,6"
@@ -212,12 +160,15 @@
                      ScrollViewer.VerticalScrollBarVisibility="Auto"
                      HorizontalContentAlignment="Stretch"
                      KeyboardNavigation.TabNavigation="Once"
+                     KeyboardNavigation.DirectionalNavigation="Contained"
                      AutomationProperties.Name="Transcript. Use the arrow keys to review each caption line."
                      AutomationProperties.HelpText="A scrollable list of every finalized caption. Up and Down arrows move line by line; Home and End jump to the first or last line.">
                 <ListBox.ItemContainerStyle>
                     <Style TargetType="ListBoxItem">
                         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                         <Setter Property="Padding" Value="6,4" />
+                        <!-- Make the screen reader read the caption text, not the object's type name. -->
+                        <Setter Property="AutomationProperties.Name" Value="{Binding Text}" />
                     </Style>
                 </ListBox.ItemContainerStyle>
                 <ListBox.ItemTemplate>

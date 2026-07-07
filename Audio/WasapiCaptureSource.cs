@@ -155,3 +155,11 @@ public sealed class MicrophoneCaptureSource() : WasapiCaptureSource(
 public sealed class SystemAudioCaptureSource() : WasapiCaptureSource(
     new WasapiLoopbackCapture(),
     "System audio (what you hear)");
+
+/// <summary>
+/// Captures the audio of a single application (and its children) via Windows
+/// process loopback — e.g. only the browser or only Teams, not the whole system mix.
+/// </summary>
+public sealed class ProcessAudioCaptureSource(int processId, string appName) : WasapiCaptureSource(
+    new ProcessLoopbackWaveIn(processId),
+    $"App audio — {appName}");

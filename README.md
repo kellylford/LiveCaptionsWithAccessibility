@@ -62,10 +62,17 @@ Pick your **Audio source** and **Engine**, then press **Start listening**.
 | Audio source | What it captions | How |
 | --- | --- | --- |
 | **Microphone** | You / people in the room | WASAPI capture of the default mic |
-| **System audio** | Anything the PC is playing — Teams, YouTube, a podcast | **WASAPI loopback** on the default render device |
+| **System audio → (All)** | Everything the PC is playing | **WASAPI loopback** on the default render device |
+| **System audio → an app** | Just one application — e.g. only the browser or only Teams | **Process loopback** (`ActivateAudioInterfaceAsync` + `AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS`) |
 
-Both paths are normalized to 16 kHz mono and fed to the same engine, so the recognizer
-never knows or cares where the audio came from.
+When **System audio** is selected, the **Application** picker lets you limit capture to a
+single running app (and its child processes) instead of the whole mix — useful for
+captioning one meeting without your music bleeding in. It lists apps that have a window;
+open the dropdown to refresh. Per-app capture uses the Windows 11 process-loopback API and
+runs with the Whisper engine.
+
+All three paths are normalized to 16 kHz mono and fed to the same engine, so the
+recognizer never knows or cares where the audio came from.
 
 ## Choosing an engine
 
@@ -74,22 +81,27 @@ never knows or cares where the audio came from.
 | **Whisper (on-device)** | High | ~1 s (segment-based) | Fully local, works with mic **and** system audio; native on ARM64. First run downloads the model. |
 | **Windows speech (SAPI)** | Modest | Instant | Ships with Windows, zero download, but **microphone only**. |
 
-## Keyboard shortcuts
+## Keyboard model
 
-| Action | Shortcut |
+The app works like a document with a menu bar. **Focus stays on the transcript** — the
+only content control — and `Tab` does nothing. You review captions with the arrow keys
+and reach every command from the menu bar (`Alt` or `F10`), so there is no tabbing
+through toolbars.
+
+| Action | Key |
 | --- | --- |
+| Review lines | `↑` `↓` `Home` `End` |
+| Open the menu bar | `Alt` or `F10`, then arrow keys |
 | Start / stop listening | `Ctrl+R` |
-| Go to transcript | `Ctrl+T` |
-| Review lines | `↑` `↓` `Home` `End` (inside the transcript) |
 | Larger / smaller text | `Ctrl +` / `Ctrl −` |
 | Toggle screen-reader announcements | `F8` |
-| Show / hide timestamps | View menu |
 | Copy all | `Ctrl+Shift+C` |
 | Save transcript | `Ctrl+S` |
 | Clear | `Ctrl+L` |
 
-Everything is also on the **Captions** and **View** menus (with `Alt` access keys) and
-the toolbar.
+All commands live on the **Captions**, **Audio**, and **View** menus (each with `Alt`
+access keys). Audio source, per-app capture, and engine are radio choices under
+**Audio**.
 
 ## Trying it with a screen reader
 

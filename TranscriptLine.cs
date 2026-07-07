@@ -39,4 +39,7 @@ public sealed class TranscriptLine : INotifyPropertyChanged
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    // Fallback accessible name / clipboard text if anything reads the item directly.
+    public override string ToString() => Text;
 }

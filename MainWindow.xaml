@@ -10,7 +10,8 @@
         Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
         FontSize="15"
         UseLayoutRounding="True"
-        TextOptions.TextFormattingMode="Ideal">
+        TextOptions.TextFormattingMode="Ideal"
+        FocusManager.FocusedElement="{Binding ElementName=TranscriptList}">
 
     <!-- Keyboard shortcuts are attached to the commands themselves (see code-behind
          InputGestures) so they work from anywhere in the window. -->
@@ -161,8 +162,7 @@
                      HorizontalContentAlignment="Stretch"
                      KeyboardNavigation.TabNavigation="Once"
                      KeyboardNavigation.DirectionalNavigation="Contained"
-                     AutomationProperties.Name="Transcript. Use the arrow keys to review each caption line."
-                     AutomationProperties.HelpText="A scrollable list of every finalized caption. Up and Down arrows move line by line; Home and End jump to the first or last line.">
+                     AutomationProperties.Name="Transcript">
                 <ListBox.ItemContainerStyle>
                     <Style TargetType="ListBoxItem">
                         <Setter Property="HorizontalContentAlignment" Value="Stretch" />

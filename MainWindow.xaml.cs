@@ -82,8 +82,17 @@ public partial class MainWindow : Window
         TranscriptList.GotKeyboardFocus += TranscriptList_GotKeyboardFocus;
 
         // Tab does nothing in this app: the menu bar is reached with Alt/F10 and the
-        // transcript is the only content, so swallow Tab/Shift+Tab entirely.
-        PreviewKeyDown += (_, e) => { if (e.Key == Key.Tab) e.Handled = true; };
+        // transcript is the only content, so swallow Tab/Shift+Tab entirely. When the
+        // transcript is empty there are no items to move to, so swallow the arrows too
+        // rather than let focus wander off the list (e.g. onto the menu bar).
+        PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Tab)
+                e.Handled = true;
+            else if (_lines.Count == 0 && TranscriptList.IsKeyboardFocusWithin
+                     && e.Key is Key.Up or Key.Down or Key.Left or Key.Right)
+                e.Handled = true;
+        };
 
         // Focus lands on the transcript when the window opens.
         Loaded += (_, _) => FocusTranscriptStart();

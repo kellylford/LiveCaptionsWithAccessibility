@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-arm64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>AccessibleLiveCaptions</AssemblyName>
+    <RootNamespace>AccessibleLiveCaptions</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Offline mic-only quick engine -->
+    <PackageReference Include="System.Speech" Version="8.0.0" />
+    <!-- System-audio + microphone capture (WASAPI); pure-managed, works on ARM64 -->
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <!-- On-device high-accuracy speech-to-text; CPU runtime supports win-arm64 -->
+    <PackageReference Include="Whisper.net" Version="1.8.1" />
+    <PackageReference Include="Whisper.net.Runtime" Version="1.8.1" />
+  </ItemGroup>
+
+</Project>

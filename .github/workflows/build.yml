@@ -1,0 +1,43 @@
+name: Build
+
+# On-demand only: run it from the Actions tab with the "Run workflow" button.
+on:
+  workflow_dispatch:
+    inputs:
+      configuration:
+        description: Build configuration
+        type: choice
+        default: Release
+        options:
+          - Release
+          - Debug
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore
+
+      # The project targets win-arm64; the x64 runner cross-builds it (no ARM
+      # execution needed, so a hosted Windows runner is fine).
+      - name: Build
+        run: dotnet build --configuration ${{ inputs.configuration }} --no-restore
+
+      - name: Publish
+        run: dotnet publish --configuration ${{ inputs.configuration }} --no-build --output publish
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AccessibleLiveCaptions-win-arm64-${{ inputs.configuration }}
+          path: publish
+          if-no-files-found: error

@@ -9,6 +9,7 @@ using AccessibleLiveCaptions.Accessibility;
 using AccessibleLiveCaptions.Audio;
 using AccessibleLiveCaptions.Speech;
 using Microsoft.Win32;
+using Whisper.net.Ggml;
 
 namespace AccessibleLiveCaptions;
 
@@ -54,6 +55,9 @@ public partial class MainWindow : Window
     private int? _selectedAppPid;
     private string _selectedAppName = "";
 
+    // Whisper model: speed vs. accuracy trade-off.
+    private GgmlType _selectedModel = GgmlType.BaseEn;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -97,6 +101,11 @@ public partial class MainWindow : Window
         // Focus lands on the transcript when the window opens.
         Loaded += (_, _) => FocusTranscriptStart();
 
+        // Reflect the default selections (system audio + Whisper) in menu enablement,
+        // and seed the Application submenu (an empty MenuItem never opens as a submenu).
+        UpdateAudioMenuState();
+        RefreshApplicationMenu();
+
         Closed += (_, _) => _captions?.Dispose();
     }
 
@@ -131,12 +140,19 @@ public partial class MainWindow : Window
             return new SystemSpeechCaptionSource(); // SAPI: microphone only
 
         if (!SrcSystem.IsChecked)
-            return new WhisperCaptionSource(new MicrophoneCaptureSource());
+            return new WhisperCaptionSource(new MicrophoneCaptureSource(), _selectedModel);
 
         // System audio: a specific application, or the whole mix.
         if (_selectedAppPid is int pid)
-            return new WhisperCaptionSource(new ProcessAudioCaptureSource(pid, _selectedAppName));
-        return new WhisperCaptionSource(new SystemAudioCaptureSource());
+            return new WhisperCaptionSource(new ProcessAudioCaptureSource(pid, _selectedAppName), _selectedModel);
+        return new WhisperCaptionSource(new SystemAudioCaptureSource(), _selectedModel);
+    }
+
+    // Apply an audio-setting change immediately by restarting the running session.
+    private void RestartIfListening()
+    {
+        if (_captions is not null && _captions.State is CaptionState.Listening or CaptionState.Starting)
+            StartListening();
     }
 
     private void OnStateChanged(object? sender, CaptionStateChangedEventArgs e)
@@ -145,9 +161,6 @@ public partial class MainWindow : Window
         {
             var listening = e.State is CaptionState.Listening or CaptionState.Starting;
             MenuToggleListen.Header = listening ? "_Stop listening" : "_Start listening";
-
-            // Lock the audio source/engine/application choices while a session is active.
-            MenuAudio.IsEnabled = !listening;
 
             if (!string.IsNullOrWhiteSpace(e.Message))
                 SetStatus(e.Message!);
@@ -175,10 +188,14 @@ public partial class MainWindow : Window
         SetStatus(system
             ? "System audio. Use Audio ▸ Application to capture one app, or leave it on all audio."
             : "Microphone selected.");
+        RestartIfListening();
     }
 
-    private void Engine_Click(object sender, RoutedEventArgs e) =>
+    private void Engine_Click(object sender, RoutedEventArgs e)
+    {
         SelectEngine(whisper: ReferenceEquals(sender, EngWhisper));
+        RestartIfListening();
+    }
 
     private void SelectEngine(bool whisper)
     {
@@ -198,29 +215,163 @@ public partial class MainWindow : Window
             : "Windows speech engine: instant, microphone only.");
     }
 
-    private void UpdateAudioMenuState() =>
+    private void UpdateAudioMenuState()
+    {
         MenuApplication.IsEnabled = EngWhisper.IsChecked && SrcSystem.IsChecked;
+        MenuModel.IsEnabled = EngWhisper.IsChecked; // model only applies to Whisper
+    }
+
+    // ---- Whisper model (speed vs. accuracy) -----------------------------------
+    private void Model_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: string tag } clicked || !Enum.TryParse(tag, out GgmlType model))
+            return;
+
+        _selectedModel = model;
+        foreach (var obj in MenuModel.Items)
+            if (obj is MenuItem mi)
+                mi.IsChecked = ReferenceEquals(mi, clicked);
+
+        // The header carries the human description ("Tiny — fastest, …"); echo it.
+        SetStatus($"Whisper model: {clicked.Header.ToString()!.Replace("_", "")}.");
+        RestartIfListening();
+    }
+
+    // ---- Bulk model management --------------------------------------------------
+    private async void DownloadAllModels_Click(object sender, RoutedEventArgs e)
+    {
+        var missing = WhisperModelStore.AllModels.Where(m => !WhisperModelStore.IsDownloaded(m)).ToList();
+        if (missing.Count == 0)
+        {
+            SetStatus("All models are already downloaded.");
+            return;
+        }
+
+        MenuDownloadAll.IsEnabled = false;
+        int failed = 0;
+        try
+        {
+            for (int i = 0; i < missing.Count; i++)
+            {
+                var model = missing[i];
+                var prefix = $"Model {i + 1} of {missing.Count}";
+                try
+                {
+                    await WhisperModelStore.EnsureAsync(model,
+                        msg => Dispatcher.Invoke(() => SetStatus($"{prefix}: {msg}")),
+                        CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    failed++;
+                    SetStatus($"{prefix}: {WhisperModelStore.DisplayName(model)} failed — {ex.Message}");
+                }
+            }
+
+            SetStatus(failed == 0
+                ? $"All models downloaded ({missing.Count} new)."
+                : $"Model downloads finished: {missing.Count - failed} succeeded, {failed} failed.");
+        }
+        finally
+        {
+            MenuDownloadAll.IsEnabled = true;
+        }
+    }
+
+    private void ClearModels_Click(object sender, RoutedEventArgs e)
+    {
+        // A loaded model file is locked, so end any active session first.
+        if (_captions is not null)
+        {
+            _captions.Stop();
+            _captions.Dispose();
+            _captions = null;
+        }
+
+        var (count, megabytes) = WhisperModelStore.ClearAll();
+        SetStatus(count == 0
+            ? "No downloaded models to clear."
+            : $"Cleared {count} model file{(count == 1 ? "" : "s")}, freeing {megabytes:0} MB.");
+    }
 
     // Rebuild the Application submenu each time it opens so newly launched apps appear.
-    private void MenuApplication_SubmenuOpened(object sender, RoutedEventArgs e)
+    // (It is also populated at startup: a MenuItem with no children is treated by WPF
+    // as a plain item, so SubmenuOpened would never fire on an empty menu.)
+    private void MenuApplication_SubmenuOpened(object sender, RoutedEventArgs e) =>
+        RefreshApplicationMenu();
+
+    private void RefreshApplicationMenu()
     {
         MenuApplication.Items.Clear();
         MenuApplication.Items.Add(MakeAppItem(null, "(All system audio)", ""));
+
+        foreach (var (pid, label, name) in EnumerateAudioApps())
+            MenuApplication.Items.Add(MakeAppItem(pid, label, name));
+    }
+
+    /// <summary>
+    /// Apps offered for per-app capture. Primary source: audio sessions on the default
+    /// output device — any process that is (or recently was) rendering audio, which
+    /// catches packaged apps like Media Player whose windows are hosted elsewhere.
+    /// Windowed processes are appended as a fallback for apps that haven't started
+    /// playing yet.
+    /// </summary>
+    private static List<(int Pid, string Label, string Name)> EnumerateAudioApps()
+    {
+        var byPid = new Dictionary<int, (string Label, string Name, bool Playing)>();
+
+        try
+        {
+            using var devEnum = new NAudio.CoreAudioApi.MMDeviceEnumerator();
+            using var device = devEnum.GetDefaultAudioEndpoint(
+                NAudio.CoreAudioApi.DataFlow.Render, NAudio.CoreAudioApi.Role.Multimedia);
+            var sessions = device.AudioSessionManager.Sessions;
+            for (int i = 0; i < sessions.Count; i++)
+            {
+                try
+                {
+                    var session = sessions[i];
+                    int pid = (int)session.GetProcessID;
+                    if (pid == 0 || pid == Environment.ProcessId)
+                        continue; // system sounds / ourselves
+
+                    using var proc = Process.GetProcessById(pid);
+                    bool playing = session.State == NAudio.CoreAudioApi.Interfaces.AudioSessionState.AudioSessionStateActive;
+                    var label = playing ? $"{proc.ProcessName} — playing" : proc.ProcessName;
+                    if (!byPid.TryGetValue(pid, out var existing) || (playing && !existing.Playing))
+                        byPid[pid] = (label, proc.ProcessName, playing);
+                }
+                catch
+                {
+                    // Session ended or process gone; skip it.
+                }
+            }
+        }
+        catch
+        {
+            // No output device or session enumeration failed — fall back to windows only.
+        }
 
         foreach (var p in Process.GetProcesses())
         {
             try
             {
-                if (string.IsNullOrWhiteSpace(p.MainWindowTitle))
+                if (byPid.ContainsKey(p.Id) || string.IsNullOrWhiteSpace(p.MainWindowTitle))
                     continue;
                 var title = p.MainWindowTitle.Length > 40 ? p.MainWindowTitle[..40] + "…" : p.MainWindowTitle;
-                MenuApplication.Items.Add(MakeAppItem(p.Id, $"{p.ProcessName} — {title}", p.ProcessName));
+                byPid[p.Id] = ($"{p.ProcessName} — {title}", p.ProcessName, false);
             }
             catch
             {
                 // Process exited or access denied; skip it.
             }
         }
+
+        return byPid
+            .OrderByDescending(kv => kv.Value.Playing) // currently-playing apps first
+            .ThenBy(kv => kv.Value.Label, StringComparer.CurrentCultureIgnoreCase)
+            .Select(kv => (kv.Key, kv.Value.Label, kv.Value.Name))
+            .ToList();
     }
 
     private MenuItem MakeAppItem(int? pid, string header, string name)
@@ -251,6 +402,7 @@ public partial class MainWindow : Window
         SetStatus(tag.Pid is null
             ? "Capturing all system audio."
             : $"Capturing audio from {tag.Name}.");
+        RestartIfListening();
     }
 
     private sealed record AppTag(int? Pid, string Name);

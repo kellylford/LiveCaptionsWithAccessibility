@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using System.Net.Http;
 using System.Text;
 using AccessibleLiveCaptions.Audio;
 using Whisper.net;
@@ -237,24 +238,8 @@ public sealed class WhisperCaptionSource : ICaptionSource
         return voiced;
     }
 
-    private static async Task<string> EnsureModelAsync(GgmlType type, CancellationToken ct)
-    {
-        var dir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "AccessibleLiveCaptions", "models");
-        Directory.CreateDirectory(dir);
-
-        var path = Path.Combine(dir, $"ggml-{type}.bin");
-        if (File.Exists(path) && new FileInfo(path).Length > 0)
-            return path;
-
-        using var stream = await WhisperGgmlDownloader.Default.GetGgmlModelAsync(type, cancellationToken: ct);
-        var tmp = path + ".part";
-        await using (var fs = File.Create(tmp))
-            await stream.CopyToAsync(fs, ct);
-        File.Move(tmp, path, overwrite: true);
-        return path;
-    }
+    private Task<string> EnsureModelAsync(GgmlType type, CancellationToken ct) =>
+        WhisperModelStore.EnsureAsync(type, msg => SetState(CaptionState.Starting, msg), ct);
 
     private void SetState(CaptionState state, string? message)
     {

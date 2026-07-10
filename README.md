@@ -149,7 +149,7 @@ The UI depends only on `ICaptionSource`; the engine depends only on
 
 ## Documentation & building
 
-- **[docs/SPEC.md](docs/SPEC.md)** — a formal, build-it-again specification: the design
+- **[docs/LiveCaptionSpec.md](docs/LiveCaptionSpec.md)** — a formal, build-it-again specification: the design
   principles, the two decoupling seams, the accessibility/keyboard contract, and a
   file-by-file map.
 - **[docs/release-notes-v0.1.0.md](docs/release-notes-v0.1.0.md)** — the 0.1 release notes.

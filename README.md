@@ -107,9 +107,9 @@ access keys). Audio source, per-app capture, and engine are radio choices under
 
 1. Turn on **Narrator** (`Ctrl+Win+Enter`) or NVDA.
 2. Press **Start listening** and speak — each finished sentence is announced.
-3. Press `F8` to turn announcements off, then `Ctrl+T` and use the arrow keys to
-   review the transcript at your own pace. This is the review experience the built-in
-   feature lacks.
+3. Press `F8` to turn announcements off, then use the arrow keys to review the
+   transcript at your own pace — focus already lives on the transcript. This is the
+   review experience the built-in feature lacks.
 
 ## How it's built
 
@@ -146,6 +146,18 @@ The UI depends only on `ICaptionSource`; the engine depends only on
   `ICaptionSource` seam.
 - **Punctuation / diarization / language switching** — all live inside the engine class;
   the accessible UI is unaffected.
+
+## Documentation & building
+
+- **[docs/SPEC.md](docs/SPEC.md)** — a formal, build-it-again specification: the design
+  principles, the two decoupling seams, the accessibility/keyboard contract, and a
+  file-by-file map.
+- **[docs/release-notes-v0.1.0.md](docs/release-notes-v0.1.0.md)** — the 0.1 release notes.
+- **Build locally:** `dotnet build` or double-click **`build.bat`**.
+- **CI:** `.github/workflows/build.yml` builds on demand (Actions ▸ *Build* ▸ **Run
+  workflow**). `.github/workflows/release.yml` publishes a self-contained win-arm64 zip as a
+  GitHub Release whenever a `v*` tag (e.g. `v0.1.0`) is pushed, reading its notes from
+  `docs/release-notes-<tag>.md`.
 
 ## The point for Microsoft
 

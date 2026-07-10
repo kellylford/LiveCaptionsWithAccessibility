@@ -1,0 +1,65 @@
+name: Release
+
+# Publishes a GitHub Release when a version tag (v0.1.0, v0.2.0, …) is pushed.
+# The tag is the trigger; nothing publishes on an ordinary push to main.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write  # softprops/action-gh-release needs this to create the release
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      # The release tag is the single source of truth for the version. It must match
+      # the csproj <Version> so the published build can never mis-report itself.
+      - name: Verify tag matches csproj version
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'.TrimStart('v')
+          $value = (Select-Xml -Path AccessibleLiveCaptions.csproj `
+                      -XPath "/Project/PropertyGroup/Version").Node.InnerText
+          if ($tag -ne $value) {
+            throw "Tag version '$tag' does not match csproj <Version> '$value'. Update the csproj or re-tag."
+          }
+          Write-Host "Tag $tag matches csproj <Version>."
+
+      # Self-contained so recipients can unzip and run with no .NET install. The csproj
+      # already targets win-arm64 (Snapdragon / Copilot+ PC); a hosted x64 runner
+      # cross-publishes it fine (no ARM execution needed to publish).
+      - name: Publish (self-contained, win-arm64)
+        run: >
+          dotnet publish AccessibleLiveCaptions.csproj
+          --configuration Release
+          --runtime win-arm64
+          --self-contained true
+          --output publish
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $zip = "AccessibleLiveCaptions-${{ github.ref_name }}-win-arm64.zip"
+          Compress-Archive -Path publish/* -DestinationPath $zip -Force
+          "ASSET=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      # Release notes come from docs/release-notes-<tag>.md (e.g. release-notes-v0.1.0.md).
+      # fail_on_unmatched_files makes a missing zip fail the release rather than publish
+      # an empty one.
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Accessible Live Captions ${{ github.ref_name }}
+          body_path: docs/release-notes-${{ github.ref_name }}.md
+          files: ${{ env.ASSET }}
+          fail_on_unmatched_files: true

@@ -162,14 +162,10 @@ public partial class MainWindow : Window
             var listening = e.State is CaptionState.Listening or CaptionState.Starting;
             MenuToggleListen.Header = listening ? "_Stop listening" : "_Start listening";
 
+            // SetStatus both shows the message and announces it with interrupt:true,
+            // so an error already interrupts the screen reader — no separate announce.
             if (!string.IsNullOrWhiteSpace(e.Message))
                 SetStatus(e.Message!);
-
-            if (e.State == CaptionState.Error && !string.IsNullOrWhiteSpace(e.Message))
-            {
-                // Errors are important — make sure the screen reader interrupts with them.
-                ScreenReader.Announce(this, e.Message!, interrupt: true, "status");
-            }
         });
     }
 

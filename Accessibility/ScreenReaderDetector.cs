@@ -20,6 +20,18 @@ public static class ScreenReaderDetector
         ("Narrator", "Narrator"),
     ];
 
+    // Processes whose audio IS screen-reader speech even though they aren't the
+    // reader's main process — e.g. JAWS renders through its fsSynth synthesizer.
+    private static readonly string[] SpeechProcesses =
+        ["nvda", "jfw", "Narrator", "fsSynth32", "fsSynth64"];
+
+    /// <summary>
+    /// True when a process's audio output is screen-reader speech (used by the
+    /// capture watchdog so the reader speaking alone never counts as missed audio).
+    /// </summary>
+    public static bool IsScreenReaderSpeechProcess(string processName) =>
+        SpeechProcesses.Any(p => string.Equals(p, processName, StringComparison.OrdinalIgnoreCase));
+
     /// <summary>The first running screen reader, or null if none is detected.</summary>
     public static (int Pid, string Name)? FindRunning()
     {

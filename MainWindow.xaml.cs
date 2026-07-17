@@ -201,10 +201,10 @@ public partial class MainWindow : Window
         // speech) so captions cover the meeting/video, not the reader's narration.
         IAudioCaptureSource capture =
             !SrcSystem.IsChecked ? new MicrophoneCaptureSource()
-            : _selectedAppPid is int pid ? new ProcessAudioCaptureSource(pid, _selectedAppName)
+            : _selectedAppPid is int pid ? MakeAppCapture(pid, _selectedAppName)
             : MenuExcludeScreenReader.IsChecked
               && ScreenReaderDetector.FindRunning() is (int srPid, string srName)
-                ? new SystemAudioExceptProcessCaptureSource(srPid, srName)
+                ? MakeExcludeCapture(srPid, srName)
                 : new SystemAudioCaptureSource();
 
         return SelectedEngine switch
@@ -215,6 +215,46 @@ public partial class MainWindow : Window
 #endif
             _ => new WhisperCaptionSource(capture, _selectedModel)
         };
+    }
+
+    // On some audio devices the process-loopback tap delivers only silence (both
+    // include and exclude modes) while plain device loopback works — observed with a
+    // hardware-offloaded "Hi-Res Audio" headphone output. The capture sources detect
+    // that via ProcessLoopbackWatchdog; react so the user is never left with a silent,
+    // hallucinating captioner and no explanation.
+
+    private string? _excludeTapDeadNotice;
+
+    private IAudioCaptureSource MakeExcludeCapture(int srPid, string srName)
+    {
+        var capture = new SystemAudioExceptProcessCaptureSource(srPid, srName);
+        capture.TapSilent += (_, _) => Dispatcher.BeginInvoke(() =>
+        {
+            if (_captions is null || _captions.State is not (CaptionState.Listening or CaptionState.Starting))
+                return;
+            // Turn the toggle off (visible, persistent state); its Changed handler
+            // announces this notice and restarts listening with plain loopback.
+            _excludeTapDeadNotice =
+                $"Sound is playing but none reached the captioner: this audio device does not " +
+                $"support excluding {srName}'s speech. Exclusion is now off, and captions include " +
+                $"all system audio — including your screen reader.";
+            MenuExcludeScreenReader.IsChecked = false;
+        });
+        return capture;
+    }
+
+    private IAudioCaptureSource MakeAppCapture(int pid, string appName)
+    {
+        var capture = new ProcessAudioCaptureSource(pid, appName);
+        capture.TapSilent += (_, _) => Dispatcher.BeginInvoke(() =>
+        {
+            if (_captions is null || _captions.State is not (CaptionState.Listening or CaptionState.Starting))
+                return;
+            SetStatus($"{appName} is playing sound, but none is reaching the captioner. " +
+                      "This audio device may not support per-application capture; under " +
+                      "Audio, Application, choose (All system audio) instead.");
+        });
+        return capture;
     }
 
     // Apply an audio-setting change immediately by restarting the running session.
@@ -334,6 +374,16 @@ public partial class MainWindow : Window
     {
         if (!IsLoaded)
             return;
+
+        // Turned off automatically because the tap was found dead — explain that.
+        if (_excludeTapDeadNotice is string notice)
+        {
+            _excludeTapDeadNotice = null;
+            SetStatus(notice);
+            RestartIfListening();
+            return;
+        }
+
         SetStatus(MenuExcludeScreenReader.IsChecked
             ? ScreenReaderDetector.FindRunning() is (_, string name)
                 ? $"System-audio captions will exclude {name}'s speech."

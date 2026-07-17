@@ -133,7 +133,7 @@ public abstract class WasapiCaptureSource : IAudioCaptureSource
             Failed?.Invoke(this, "Audio capture stopped unexpectedly: " + e.Exception.Message);
     }
 
-    public void Dispose()
+    public virtual void Dispose()
     {
         Stop();
         _capture.DataAvailable -= OnDataAvailable;
@@ -159,10 +159,34 @@ public sealed class SystemAudioCaptureSource() : WasapiCaptureSource(
 /// <summary>
 /// Captures the audio of a single application (and its children) via Windows
 /// process loopback — e.g. only the browser or only Teams, not the whole system mix.
+/// On some audio devices the process-loopback tap silently delivers nothing (see
+/// <see cref="ProcessLoopbackWatchdog"/>); <see cref="TapSilent"/> reports that.
 /// </summary>
-public sealed class ProcessAudioCaptureSource(int processId, string appName) : WasapiCaptureSource(
-    new ProcessLoopbackWaveIn(processId),
-    $"App audio — {appName}");
+public sealed class ProcessAudioCaptureSource : WasapiCaptureSource
+{
+    private readonly ProcessLoopbackWatchdog _watchdog;
+
+    public ProcessAudioCaptureSource(int processId, string appName)
+        : base(new ProcessLoopbackWaveIn(processId), $"App audio — {appName}")
+    {
+        // Reference = any session owned by the captured app (matched by name, since
+        // multi-process apps own several sessions): if the app is audibly rendering
+        // while we receive silence, the tap is dead.
+        _watchdog = new ProcessLoopbackWatchdog((pid, name) =>
+            pid == processId || string.Equals(name, appName, StringComparison.OrdinalIgnoreCase));
+        FrameAvailable += (_, e) => _watchdog.NoteSamples(e.Samples);
+        _watchdog.TapSilent += (_, _) => TapSilent?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>The captured app is audibly playing but the tap delivers silence.</summary>
+    public event EventHandler? TapSilent;
+
+    public override void Dispose()
+    {
+        _watchdog.Dispose();
+        base.Dispose();
+    }
+}
 
 /// <summary>
 /// Captures the whole system mix EXCEPT one process tree, via process loopback's
@@ -170,8 +194,34 @@ public sealed class ProcessAudioCaptureSource(int processId, string appName) : W
 /// has the screen reader speaking, so "caption what I hear" must be able to mean
 /// "…except my screen reader's own voice" — otherwise the meeting captions are
 /// interleaved with the screen reader's narration (including its announcements of the
-/// captions themselves).
+/// captions themselves). On some audio devices the process-loopback tap silently
+/// delivers nothing (see <see cref="ProcessLoopbackWatchdog"/>); <see cref="TapSilent"/>
+/// reports that so the owner can fall back to plain loopback.
 /// </summary>
-public sealed class SystemAudioExceptProcessCaptureSource(int processId, string name) : WasapiCaptureSource(
-    new ProcessLoopbackWaveIn(processId, includeProcessTree: false),
-    $"System audio except {name}");
+public sealed class SystemAudioExceptProcessCaptureSource : WasapiCaptureSource
+{
+    private readonly ProcessLoopbackWatchdog _watchdog;
+
+    public SystemAudioExceptProcessCaptureSource(int processId, string name)
+        : base(new ProcessLoopbackWaveIn(processId, includeProcessTree: false),
+               $"System audio except {name}")
+    {
+        // Reference = sessions that should reach us: everything except the excluded
+        // screen reader (and any screen-reader speech process — the reader speaking
+        // alone must not count as missed audio).
+        _watchdog = new ProcessLoopbackWatchdog((pid, procName) =>
+            pid != processId
+            && !Accessibility.ScreenReaderDetector.IsScreenReaderSpeechProcess(procName));
+        FrameAvailable += (_, e) => _watchdog.NoteSamples(e.Samples);
+        _watchdog.TapSilent += (_, _) => TapSilent?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Other apps are audibly playing but the tap delivers silence.</summary>
+    public event EventHandler? TapSilent;
+
+    public override void Dispose()
+    {
+        _watchdog.Dispose();
+        base.Dispose();
+    }
+}

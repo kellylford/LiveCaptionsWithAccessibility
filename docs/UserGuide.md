@@ -213,6 +213,18 @@ You are probably offline. Windows speech (SAPI) works with no download, micropho
 Audio ▸ **Exclude screen reader speech** should be checked. If you restarted your reader
 mid-session, stop and start listening again. Only one reader is excluded at a time.
 
+**The app announced that my audio device does not support excluding the screen reader.**
+Some audio devices (seen with certain "Hi-Res" headphone outputs) render audio in a way
+Windows' per-process capture cannot tap. The app detects this within a few seconds,
+turns exclusion off, and keeps captioning everything — including your reader's speech.
+Per-application capture has the same limitation on such devices, and the app announces
+that too. To get exclusion or per-app capture back, switch Windows' default output to a
+different device (for example the built-in speakers) and restart listening.
+
+**Captions show things like "soft music" but not the dialog.**
+That was the recognizer hearing silence and guessing. Current versions detect the cause
+(see the previous item) and fix themselves; if you see it, stop and start listening.
+
 **The Windows on-device engine is disabled.**
 It needs the packaged version (section 8), Windows 11 24H2+, and on non-Copilot+ PCs a
 one-time model download that Windows performs in the background.

@@ -204,6 +204,20 @@ live: with exclusion on, test sentences transcribed exactly and the capture was 
 silent while JAWS spoke. Audio ▸ "Exclude screen reader speech" (default on) disables when
 a specific app is being captured — a single app's audio never contains the reader anyway.
 
+**Caveat and mitigation: on some audio devices the process-loopback tap is dead.**
+Observed with a "Hi-Res Audio" headphone output (likely hardware-offloaded rendering):
+process loopback delivers only silent packets in BOTH include and exclude modes, while
+plain device loopback hears everything — so exclusion or per-app capture would silently
+caption nothing (and a recognizer fed silence hallucinates, e.g. "soft music").
+`ProcessLoopbackWatchdog` compares captured energy against the peak meters of the audio
+sessions that should be reaching the capture (screen-reader speech processes are filtered
+from the reference so the reader speaking alone can't false-trigger). After ~3 s of
+"reference audible, capture silent": exclude mode announces the problem, turns the toggle
+off, and restarts on plain loopback (captions win over exclusion); per-app mode announces
+that this device can't do per-app capture and suggests (All system audio). Verified live:
+Netflix on the offloaded device produced no captions under exclusion, and the fallback
+restarted and captioned it within seconds.
+
 **Decision: Process loopback via raw COM interop.**
 Per-app capture needs `ActivateAudioInterfaceAsync` with `AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS`
 (Windows 10 20H1+/11), which NAudio does not wrap. `ProcessLoopbackWaveIn` implements NAudio's
@@ -405,6 +419,7 @@ downloaded from `huggingface.co/csukuangfj/sherpa-onnx-nemo-streaming-fast-confo
 | `Audio/IAudioCaptureSource.cs` | Capture seam + `AudioFrameEventArgs` |
 | `Audio/WasapiCaptureSource.cs` | Base capture (downmix + resample) + mic/loopback/process subclasses |
 | `Audio/ProcessLoopbackWaveIn.cs` | Process-loopback `IWaveIn` via COM interop on an MTA thread |
+| `Audio/ProcessLoopbackWatchdog.cs` | Detects a dead process-loopback tap (silent capture vs. audible sessions) |
 | `Speech/ICaptionSource.cs` | Caption seam + state/text event args |
 | `Speech/SystemSpeechCaptionSource.cs` | SAPI dictation engine (mic only) |
 | `Speech/WhisperCaptionSource.cs` | Whisper engine + real-time segmentation |
@@ -426,6 +441,7 @@ downloaded from `huggingface.co/csukuangfj/sherpa-onnx-nemo-streaming-fast-confo
 | COM deadlock activating process loopback | Med | Blocker (per-app only) | Dedicated MTA capture thread; 5 s activation timeout |
 | Segmentation cuts words / lags | Med | Major | Tunable constants (§11); Base model default; larger models opt-in |
 | Whisper model download fails offline | Low | Major | Clear status messages; SAPI works with no download |
+| Process-loopback tap silent on some (offloaded) audio devices | Med | Major (exclude + per-app) | `ProcessLoopbackWatchdog`: auto-fallback to plain loopback (exclude) / spoken warning (per-app) |
 | Framework-dependent artifact won't run | Low | Major | Release publishes **self-contained** win-arm64 |
 
 **Open questions (deferred):** GA of `Microsoft.Windows.AI.Speech` (currently experimental;

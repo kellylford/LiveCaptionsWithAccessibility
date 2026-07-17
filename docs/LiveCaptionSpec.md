@@ -86,7 +86,10 @@ accessible *surface* is what's missing, and that's a UI problem this app solves.
 | Audio source: Microphone | Audio ▸ Source | — | WASAPI capture of the default mic |
 | Audio source: System audio | Audio ▸ Source | **Selected** | WASAPI render loopback (everything you hear) |
 | Per-app capture | Audio ▸ Application | (All system audio) | Process loopback; menu rebuilds on open to list current apps |
+| Exclude screen reader speech | Audio menu | **On** | Whole-mix capture excludes the running screen reader's process tree (NVDA/JAWS/Narrator) |
 | Engine: Whisper | Audio ▸ Engine | **Selected** | On-device; mic **and** system audio |
+| Engine: Streaming | Audio ▸ Engine | — | True word-by-word streaming (NeMo FastConformer via sherpa-onnx); mic **and** system audio |
+| Engine: Windows on-device (NPU) | Audio ▸ Engine | — | Windows AI flavor only (`-p:WindowsAI=true`, MSIX); the OS Live Captions recognizer, NPU-accelerated on Copilot+ |
 | Engine: Windows speech (SAPI) | Audio ▸ Engine | — | Instant; **microphone only** |
 | Whisper model picker | Audio ▸ Whisper model | Base (en) | Tiny → Large v3; downloads on demand |
 | Download all models | Audio menu | — | Fetches every model (~7 GB) with progress |
@@ -102,7 +105,8 @@ accessible *surface* is what's missing, and that's a UI problem this app solves.
 
 - No persistence of transcripts across runs (Save is manual, to a file).
 - No punctuation/diarization/language-switching UI (all live inside the engine class).
-- No NPU acceleration (Whisper runs on CPU; NPU is a documented future step).
+- The Streaming engine emits lowercase, unpunctuated text (a transducer property); a
+  punctuation model is a possible future refinement.
 - No installer/auto-update (portable zip only; QuickMail's Velopack model is not adopted).
 - No architectures other than win-arm64 in shipped binaries (build from source for x64).
 - SAPI cannot caption system audio; that pairing is intentionally disallowed in the UI.
@@ -117,13 +121,21 @@ accessible *surface* is what's missing, and that's a UI problem this app solves.
 Audio/IAudioCaptureSource      — emits normalized 16 kHz mono float frames + Failed
   ├─ MicrophoneCaptureSource       — WASAPI capture of the default mic
   ├─ SystemAudioCaptureSource      — WASAPI render loopback (everything you hear)
-  └─ ProcessAudioCaptureSource     — Windows process loopback (one app + its children)
-        (all three subclass WasapiCaptureSource: downmix to mono + resample to 16 kHz;
-         ProcessAudioCaptureSource wraps ProcessLoopbackWaveIn, a hand-rolled IWaveIn)
+  ├─ ProcessAudioCaptureSource     — Windows process loopback (one app + its children)
+  └─ SystemAudioExceptProcessCaptureSource — process loopback EXCLUDE mode: the whole
+        mix minus one process tree (used to remove the screen reader's own speech)
+        (all four subclass WasapiCaptureSource: downmix to mono + resample to 16 kHz;
+         the process-loopback pair wraps ProcessLoopbackWaveIn, a hand-rolled IWaveIn)
+
+Accessibility/ScreenReaderDetector — finds the running screen reader (NVDA/JAWS/Narrator)
 
 Speech/ICaptionSource          — Start/Stop + PartialRecognized / FinalRecognized / StateChanged
   ├─ WhisperCaptionSource          — on-device Whisper.net; consumes an IAudioCaptureSource,
   │                                  energy-VAD segmentation, emits interim + final
+  ├─ SherpaCaptionSource           — true-streaming NeMo FastConformer transducer (sherpa-onnx);
+  │                                  word-by-word partials, endpoint rules finalize lines
+  ├─ WindowsAiCaptionSource        — Windows AI flavor only: the OS on-device recognizer
+  │                                  (Microsoft.Windows.AI.Speech; NPU on Copilot+ PCs)
   └─ SystemSpeechCaptionSource     — offline SAPI dictation (mic only; owns its own audio)
 
 Accessibility/ScreenReader     — speaks text via the UIA Notification event (no focus change)
@@ -145,6 +157,34 @@ on-device principle); Windows on-device recognizer (not cleanly exposed for arbi
 Rationale: Whisper.net's CPU runtime is verified native on win-arm64 and high-accuracy;
 SAPI stays as a zero-download instant fallback.
 
+**Decision: A true streaming engine (sherpa-onnx) alongside Whisper.**
+Whisper is chunked: the utterance-so-far is re-transcribed every ~700 ms, so caption
+latency is the utterance length plus decode time and CPU cost grows with utterance
+length. A streaming transducer decodes incrementally — words appear ~0.5 s after they
+are spoken at a fraction of the compute (measured RTF ≈ 0.10 on a Snapdragon X Elite).
+Model: NVIDIA NeMo cache-aware streaming FastConformer transducer, 480 ms-latency
+export for sherpa-onnx (the 80 ms export was measurably less accurate — dropped word
+endings — while 480 ms reproduced the reference transcript exactly). sherpa-onnx ships
+first-party win-arm64 NuGet runtimes. Two engine-specific mitigations live in
+`SherpaCaptionSource`: system loopback delivers no frames while nothing renders, so the
+worker feeds wall-clock-paced silence to keep endpoint rules honest; and on Stop the
+stream is padded with 0.8 s of silence so the encoder has right-context to decode the
+final word. Transducer output is lowercase/unpunctuated; finals get a leading capital.
+
+**Decision: The Windows on-device recognizer as an opt-in flavor, not the default.**
+`Microsoft.Windows.AI.Speech` (Windows App SDK 2.2-experimental) exposes the OS Live
+Captions model family with streaming Recognizing/Recognized events and a
+`SpeechAudioProvider.PushData` input that accepts our 16 kHz mono capture — NPU-backed
+and effectively free on Copilot+ PCs. But it requires MSIX packaging with the
+`systemAIModels` capability and an experimental SDK, so it is gated behind
+`-p:WindowsAI=true` (see `packaging/`): the portable zip stays dependency-light, and the
+packaged flavor adds the "Windows on-device" engine. When the engine cannot run
+(unpackaged, pre-24H2), its menu item stays visible but disabled with the reason in the
+tooltip/HelpText. Whisper-on-NPU directly was evaluated and rejected: whisper.cpp has no
+Hexagon backend on Windows, and ONNX-Runtime-QNN Whisper needs a hand-built decode
+pipeline for ~no speed gain over the 12-core Oryon CPU (the NPU win is power, which the
+Windows API already delivers).
+
 **Decision: Real-time segmentation over a non-streaming recognizer.**
 Whisper is not a streaming recognizer. A single worker thread accumulates audio into an
 "utterance", a simple energy VAD (RMS threshold) tracks trailing silence, every ~700 ms the
@@ -152,6 +192,17 @@ utterance-so-far is re-transcribed and emitted as an **interim** caption, and wh
 silence follows real speech (or the utterance exceeds ~12 s) it is transcribed once more and
 emitted as a **final** line, then reset. One worker thread owns the processor so inference
 never overlaps.
+
+**Decision: Exclude the screen reader from whole-mix capture, on by default.**
+The primary audience runs a screen reader, so "caption what I hear" naïvely includes the
+reader's own narration — interleaving it with the meeting/video captions and re-captioning
+the app's own announcements (a feedback loop). Process loopback's EXCLUDE mode
+(`PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE`) removes one process tree from the
+mix; `ScreenReaderDetector` finds the running reader (NVDA/JAWS/Narrator, first match
+wins — the API takes a single tree) and whole-mix capture targets it. Verified with JAWS
+live: with exclusion on, test sentences transcribed exactly and the capture was digitally
+silent while JAWS spoke. Audio ▸ "Exclude screen reader speech" (default on) disables when
+a specific app is being captured — a single app's audio never contains the reader anyway.
 
 **Decision: Process loopback via raw COM interop.**
 Per-app capture needs `ActivateAudioInterfaceAsync` with `AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS`
@@ -324,6 +375,20 @@ Whisper is built with `.WithLanguage("en")`. Bracketed non-speech tokens (e.g. `
 are dropped. Model files live in `%LOCALAPPDATA%\AccessibleLiveCaptions\models`, downloaded from
 `huggingface.co/ggerganov/whisper.cpp` as `ggml-<name>.bin`.
 
+In `SherpaCaptionSource` (endpoint rules are sherpa-onnx's, in seconds of trailing silence):
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `Rule1MinTrailingSilence` | 2.4 s | Reset after silence when nothing was decoded |
+| `Rule2MinTrailingSilence` | 0.9 s | Finalize a line after speech goes quiet |
+| `Rule3MinUtteranceLength` | 15 s | Force-finalize very long utterances |
+| Silence top-up threshold | 0.1 s | Wall-clock deficit before synthetic silence is fed |
+| Stop-flush tail padding | 0.8 s | Right-context so the last word decodes on Stop |
+
+Streaming model files (`encoder.onnx`, `decoder.onnx`, `joiner.onnx`, `tokens.txt`, 456 MB
+total) live in `%LOCALAPPDATA%\AccessibleLiveCaptions\models\nemo-streaming-en-480ms`,
+downloaded from `huggingface.co/csukuangfj/sherpa-onnx-nemo-streaming-fast-conformer-transducer-en-480ms`.
+
 ---
 
 ## 12. Files (build-it-again map)
@@ -336,6 +401,7 @@ are dropped. Model files live in `%LOCALAPPDATA%\AccessibleLiveCaptions\models`,
 | `MainWindow.xaml(.cs)` | Accessible UI, commands/shortcuts, menu logic, engine/source wiring, model commands |
 | `TranscriptLine.cs` | One finalized caption; `INotifyPropertyChanged` for the timestamp toggle |
 | `Accessibility/ScreenReader.cs` | UIA Notification-event announcer |
+| `Accessibility/ScreenReaderDetector.cs` | Detects the running screen reader for audio exclusion |
 | `Audio/IAudioCaptureSource.cs` | Capture seam + `AudioFrameEventArgs` |
 | `Audio/WasapiCaptureSource.cs` | Base capture (downmix + resample) + mic/loopback/process subclasses |
 | `Audio/ProcessLoopbackWaveIn.cs` | Process-loopback `IWaveIn` via COM interop on an MTA thread |
@@ -343,6 +409,11 @@ are dropped. Model files live in `%LOCALAPPDATA%\AccessibleLiveCaptions\models`,
 | `Speech/SystemSpeechCaptionSource.cs` | SAPI dictation engine (mic only) |
 | `Speech/WhisperCaptionSource.cs` | Whisper engine + real-time segmentation |
 | `Speech/WhisperModelStore.cs` | Model paths, presence, download-with-progress, clear |
+| `Speech/SherpaCaptionSource.cs` | True-streaming engine (sherpa-onnx NeMo transducer) |
+| `Speech/SherpaModelStore.cs` | Streaming model files: paths, download, clear |
+| `Speech/WindowsAiCaptionSource.cs` | Windows AI flavor only: OS recognizer (NPU) engine |
+| `packaging/Package.appxmanifest` | MSIX manifest for the Windows AI flavor (`systemAIModels`) |
+| `packaging/build-windows-ai.ps1` | Publish + register the Windows AI flavor locally (dev mode) |
 | `.github/workflows/build.yml` | On-demand build (workflow_dispatch), uploads the publish artifact |
 | `.github/workflows/release.yml` | On `v*` tag: verify version, publish self-contained zip, create the GitHub Release |
 
@@ -357,16 +428,19 @@ are dropped. Model files live in `%LOCALAPPDATA%\AccessibleLiveCaptions\models`,
 | Whisper model download fails offline | Low | Major | Clear status messages; SAPI works with no download |
 | Framework-dependent artifact won't run | Low | Major | Release publishes **self-contained** win-arm64 |
 
-**Open questions (deferred):** NPU acceleration (ONNX Runtime + QNN EP) — same `ICaptionSource`
-seam, larger build; multi-architecture binaries; transcript persistence across runs.
+**Open questions (deferred):** GA of `Microsoft.Windows.AI.Speech` (currently experimental;
+revisit when it reaches a stable Windows App SDK so the NPU engine can ship in the default
+build); a punctuation model for the Streaming engine; multi-architecture binaries;
+transcript persistence across runs.
 
 ---
 
 ## 14. Future Directions
 
-- **NPU acceleration** via ONNX Runtime + the QNN execution provider running a Whisper ONNX
-  model — the same class of on-device acceleration Copilot+ Live Captions uses; drops into the
-  `ICaptionSource` seam.
+- **Ship the Windows on-device (NPU) engine by default** once `Microsoft.Windows.AI.Speech`
+  graduates from the experimental Windows App SDK channel — the engine and MSIX packaging
+  already exist behind `-p:WindowsAI=true`.
+- **Punctuation/casing for the Streaming engine** via a sherpa-onnx online punctuation model.
 - **Punctuation / diarization / language switching** — all inside the engine class; the
   accessible UI is unaffected.
 - **The point for Microsoft:** the built-in recognizer is fine — add the accessible surface

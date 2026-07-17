@@ -163,3 +163,15 @@ public sealed class SystemAudioCaptureSource() : WasapiCaptureSource(
 public sealed class ProcessAudioCaptureSource(int processId, string appName) : WasapiCaptureSource(
     new ProcessLoopbackWaveIn(processId),
     $"App audio — {appName}");
+
+/// <summary>
+/// Captures the whole system mix EXCEPT one process tree, via process loopback's
+/// exclude mode. Built for the app's core audience: a screen-reader user's PC always
+/// has the screen reader speaking, so "caption what I hear" must be able to mean
+/// "…except my screen reader's own voice" — otherwise the meeting captions are
+/// interleaved with the screen reader's narration (including its announcements of the
+/// captions themselves).
+/// </summary>
+public sealed class SystemAudioExceptProcessCaptureSource(int processId, string name) : WasapiCaptureSource(
+    new ProcessLoopbackWaveIn(processId, includeProcessTree: false),
+    $"System audio except {name}");

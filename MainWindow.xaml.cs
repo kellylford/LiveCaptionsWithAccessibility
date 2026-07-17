@@ -58,6 +58,12 @@ public partial class MainWindow : Window
     // Whisper model: speed vs. accuracy trade-off.
     private GgmlType _selectedModel = GgmlType.BaseEn;
 
+#if WINDOWS_AI
+    // Windows AI flavor only: the OS on-device recognizer (NPU on Copilot+ PCs),
+    // created at runtime so the XAML stays identical across flavors.
+    private MenuItem? _engWindowsAi;
+#endif
+
     public MainWindow()
     {
         InitializeComponent();
@@ -101,10 +107,55 @@ public partial class MainWindow : Window
         // Focus lands on the transcript when the window opens.
         Loaded += (_, _) => FocusTranscriptStart();
 
+#if WINDOWS_AI
+        // Offer the Windows on-device recognizer between Streaming and SAPI. When it
+        // can't run here (unpackaged, unsupported OS), keep it visible but disabled
+        // with the reason exposed to screen readers, so the capability is discoverable.
+        _engWindowsAi = new MenuItem
+        {
+            Header = "Windows on-_device — NPU, same engine as Live Captions",
+            IsCheckable = true
+        };
+        _engWindowsAi.Click += Engine_Click;
+        if (EngSapi.Parent is MenuItem engineMenu)
+            engineMenu.Items.Insert(engineMenu.Items.IndexOf(EngSapi), _engWindowsAi);
+        var winAiUnavailable = WindowsAiCaptionSource.DescribeUnavailability();
+        if (winAiUnavailable is not null)
+        {
+            _engWindowsAi.IsEnabled = false;
+            _engWindowsAi.ToolTip = winAiUnavailable;
+            System.Windows.Automation.AutomationProperties.SetHelpText(_engWindowsAi, winAiUnavailable);
+        }
+#endif
+
         // Reflect the default selections (system audio + Whisper) in menu enablement,
         // and seed the Application submenu (an empty MenuItem never opens as a submenu).
         UpdateAudioMenuState();
         RefreshApplicationMenu();
+
+        // Test aids (like LIVECAPTIONS_SEED): LIVECAPTIONS_DIAG=<file> appends engine
+        // states and captions to a log so a session can be verified without watching
+        // the UI; LIVECAPTIONS_AUTOSTART=<whisper|streaming|windows-ai|sapi> selects
+        // that engine and starts listening on launch. No effect when unset.
+#if WINDOWS_AI
+        Diag(winAiUnavailable is null
+            ? "windows-ai engine: available"
+            : $"windows-ai engine: unavailable — {winAiUnavailable}");
+#endif
+        if (Environment.GetEnvironmentVariable("LIVECAPTIONS_AUTOSTART") is string autostart)
+        {
+            Loaded += (_, _) =>
+            {
+                SelectEngine(autostart switch
+                {
+                    "streaming" => Engine.Streaming,
+                    "windows-ai" => Engine.WindowsAi,
+                    "sapi" => Engine.Sapi,
+                    _ => Engine.Whisper
+                });
+                StartListening();
+            };
+        }
 
         Closed += (_, _) => _captions?.Dispose();
     }
@@ -131,21 +182,45 @@ public partial class MainWindow : Window
         _captions.PartialRecognized += OnPartial;
         _captions.FinalRecognized += OnFinal;
         _captions.StateChanged += OnStateChanged;
+        Diag("start: " + _captions.EngineDescription);
         _captions.Start();
     }
 
+    private enum Engine { Whisper, Streaming, WindowsAi, Sapi }
+
+    private Engine SelectedEngine =>
+        EngSapi.IsChecked ? Engine.Sapi
+        : EngStreaming.IsChecked ? Engine.Streaming
+#if WINDOWS_AI
+        : _engWindowsAi?.IsChecked == true ? Engine.WindowsAi
+#endif
+        : Engine.Whisper;
+
     private ICaptionSource CreateSelectedSource()
     {
-        if (!EngWhisper.IsChecked)
+        if (SelectedEngine == Engine.Sapi)
             return new SystemSpeechCaptionSource(); // SAPI: microphone only
 
-        if (!SrcSystem.IsChecked)
-            return new WhisperCaptionSource(new MicrophoneCaptureSource(), _selectedModel);
+        // Every other engine consumes any capture source: the microphone, one
+        // application, or the whole system mix. For the whole mix, a screen-reader
+        // user's own reader is normally excluded (Audio ▸ Exclude screen reader
+        // speech) so captions cover the meeting/video, not the reader's narration.
+        IAudioCaptureSource capture =
+            !SrcSystem.IsChecked ? new MicrophoneCaptureSource()
+            : _selectedAppPid is int pid ? new ProcessAudioCaptureSource(pid, _selectedAppName)
+            : MenuExcludeScreenReader.IsChecked
+              && ScreenReaderDetector.FindRunning() is (int srPid, string srName)
+                ? new SystemAudioExceptProcessCaptureSource(srPid, srName)
+                : new SystemAudioCaptureSource();
 
-        // System audio: a specific application, or the whole mix.
-        if (_selectedAppPid is int pid)
-            return new WhisperCaptionSource(new ProcessAudioCaptureSource(pid, _selectedAppName), _selectedModel);
-        return new WhisperCaptionSource(new SystemAudioCaptureSource(), _selectedModel);
+        return SelectedEngine switch
+        {
+            Engine.Streaming => new SherpaCaptionSource(capture),
+#if WINDOWS_AI
+            Engine.WindowsAi => new WindowsAiCaptionSource(capture),
+#endif
+            _ => new WhisperCaptionSource(capture, _selectedModel)
+        };
     }
 
     // Apply an audio-setting change immediately by restarting the running session.
@@ -157,6 +232,7 @@ public partial class MainWindow : Window
 
     private void OnStateChanged(object? sender, CaptionStateChangedEventArgs e)
     {
+        Diag($"state {e.State}: {e.Message}");
         Dispatcher.Invoke(() =>
         {
             var listening = e.State is CaptionState.Listening or CaptionState.Starting;
@@ -176,9 +252,9 @@ public partial class MainWindow : Window
         SrcSystem.IsChecked = system;
         SrcMic.IsChecked = !system;
 
-        // System audio needs the Whisper engine (SAPI is microphone-only).
-        if (system && !EngWhisper.IsChecked)
-            SelectEngine(whisper: true);
+        // System audio needs an engine that accepts arbitrary audio (SAPI is mic-only).
+        if (system && SelectedEngine == Engine.Sapi)
+            SelectEngine(Engine.Whisper);
 
         UpdateAudioMenuState();
         SetStatus(system
@@ -189,32 +265,62 @@ public partial class MainWindow : Window
 
     private void Engine_Click(object sender, RoutedEventArgs e)
     {
-        SelectEngine(whisper: ReferenceEquals(sender, EngWhisper));
+        SelectEngine(
+            ReferenceEquals(sender, EngSapi) ? Engine.Sapi
+            : ReferenceEquals(sender, EngStreaming) ? Engine.Streaming
+#if WINDOWS_AI
+            : ReferenceEquals(sender, _engWindowsAi) ? Engine.WindowsAi
+#endif
+            : Engine.Whisper);
         RestartIfListening();
     }
 
-    private void SelectEngine(bool whisper)
+    private void SelectEngine(Engine engine)
     {
-        EngWhisper.IsChecked = whisper;
-        EngSapi.IsChecked = !whisper;
+        EngWhisper.IsChecked = engine == Engine.Whisper;
+        EngStreaming.IsChecked = engine == Engine.Streaming;
+        EngSapi.IsChecked = engine == Engine.Sapi;
+#if WINDOWS_AI
+        if (_engWindowsAi is not null)
+            _engWindowsAi.IsChecked = engine == Engine.WindowsAi;
+#endif
 
         // SAPI can only caption the microphone.
-        if (!whisper && SrcSystem.IsChecked)
+        if (engine == Engine.Sapi && SrcSystem.IsChecked)
         {
             SrcSystem.IsChecked = false;
             SrcMic.IsChecked = true;
         }
 
         UpdateAudioMenuState();
-        SetStatus(whisper
-            ? "Whisper engine: accurate, on-device. Microphone or system audio."
-            : "Windows speech engine: instant, microphone only.");
+        SetStatus(engine switch
+        {
+            Engine.Whisper => "Whisper engine: accurate, on-device. Microphone or system audio.",
+            Engine.Streaming => "Streaming engine: word-by-word captions with the lowest delay, on-device. Microphone or system audio.",
+            Engine.WindowsAi => "Windows on-device engine: the Live Captions recognizer, NPU-accelerated on Copilot+ PCs. Microphone or system audio.",
+            _ => "Windows speech engine: instant, microphone only."
+        });
     }
 
     private void UpdateAudioMenuState()
     {
-        MenuApplication.IsEnabled = EngWhisper.IsChecked && SrcSystem.IsChecked;
-        MenuModel.IsEnabled = EngWhisper.IsChecked; // model only applies to Whisper
+        MenuApplication.IsEnabled = SelectedEngine != Engine.Sapi && SrcSystem.IsChecked;
+        // Excluding the screen reader only makes sense for the whole system mix
+        // (a single captured app never includes the reader's audio anyway).
+        MenuExcludeScreenReader.IsEnabled = MenuApplication.IsEnabled && _selectedAppPid is null;
+        MenuModel.IsEnabled = SelectedEngine == Engine.Whisper; // model only applies to Whisper
+    }
+
+    private void ExcludeScreenReader_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded)
+            return;
+        SetStatus(MenuExcludeScreenReader.IsChecked
+            ? ScreenReaderDetector.FindRunning() is (_, string name)
+                ? $"System-audio captions will exclude {name}'s speech."
+                : "System-audio captions will exclude your screen reader's speech (none detected right now)."
+            : "System-audio captions will include everything, including your screen reader's speech.");
+        RestartIfListening();
     }
 
     // ---- Whisper model (speed vs. accuracy) -----------------------------------
@@ -237,7 +343,7 @@ public partial class MainWindow : Window
     private async void DownloadAllModels_Click(object sender, RoutedEventArgs e)
     {
         var missing = WhisperModelStore.AllModels.Where(m => !WhisperModelStore.IsDownloaded(m)).ToList();
-        if (missing.Count == 0)
+        if (missing.Count == 0 && SherpaModelStore.IsDownloaded())
         {
             SetStatus("All models are already downloaded.");
             return;
@@ -264,9 +370,24 @@ public partial class MainWindow : Window
                 }
             }
 
+            if (!SherpaModelStore.IsDownloaded())
+            {
+                try
+                {
+                    await SherpaModelStore.EnsureAsync(
+                        msg => Dispatcher.Invoke(() => SetStatus($"Streaming model: {msg}")),
+                        CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    failed++;
+                    SetStatus($"Streaming model failed — {ex.Message}");
+                }
+            }
+
             SetStatus(failed == 0
-                ? $"All models downloaded ({missing.Count} new)."
-                : $"Model downloads finished: {missing.Count - failed} succeeded, {failed} failed.");
+                ? "All models downloaded."
+                : $"Model downloads finished with {failed} failure{(failed == 1 ? "" : "s")}.");
         }
         finally
         {
@@ -284,7 +405,10 @@ public partial class MainWindow : Window
             _captions = null;
         }
 
-        var (count, megabytes) = WhisperModelStore.ClearAll();
+        var (whisperCount, whisperMb) = WhisperModelStore.ClearAll();
+        var (sherpaCount, sherpaMb) = SherpaModelStore.ClearAll();
+        int count = whisperCount + sherpaCount;
+        double megabytes = whisperMb + sherpaMb;
         SetStatus(count == 0
             ? "No downloaded models to clear."
             : $"Cleared {count} model file{(count == 1 ? "" : "s")}, freeing {megabytes:0} MB.");
@@ -395,6 +519,7 @@ public partial class MainWindow : Window
             if (obj is MenuItem mi)
                 mi.IsChecked = ReferenceEquals(mi, sender);
 
+        UpdateAudioMenuState(); // the exclude toggle only applies to the whole mix
         SetStatus(tag.Pid is null
             ? "Capturing all system audio."
             : $"Capturing audio from {tag.Name}.");
@@ -408,11 +533,13 @@ public partial class MainWindow : Window
     {
         // Interim guesses update the "Now hearing" line only. We intentionally do NOT
         // announce every partial — that would flood a screen reader with half-words.
+        Diag("partial: " + e.Text);
         Dispatcher.Invoke(() => InterimText.Text = e.Text);
     }
 
     private void OnFinal(object? sender, CaptionTextEventArgs e)
     {
+        Diag("final: " + e.Text);
         Dispatcher.Invoke(() =>
         {
             InterimText.Text = "—";
@@ -538,5 +665,17 @@ public partial class MainWindow : Window
     {
         StatusText.Text = message;
         ScreenReader.Announce(this, message, interrupt: true, "status");
+    }
+
+    // ---- Diagnostics (LIVECAPTIONS_DIAG) ---------------------------------------
+    private static readonly string? DiagPath =
+        Environment.GetEnvironmentVariable("LIVECAPTIONS_DIAG");
+
+    private static void Diag(string line)
+    {
+        if (DiagPath is null)
+            return;
+        try { File.AppendAllText(DiagPath, $"{DateTime.Now:HH:mm:ss.fff} {line}{Environment.NewLine}"); }
+        catch { /* diagnostics must never break the app */ }
     }
 }

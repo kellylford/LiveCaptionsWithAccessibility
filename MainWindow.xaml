@@ -75,10 +75,15 @@
                 </MenuItem>
                 <MenuItem x:Name="MenuApplication" Header="A_pplication" IsEnabled="False"
                           SubmenuOpened="MenuApplication_SubmenuOpened" />
+                <MenuItem x:Name="MenuExcludeScreenReader" Header="Exclude screen _reader speech"
+                          IsCheckable="True" IsChecked="True"
+                          Checked="ExcludeScreenReader_Changed" Unchecked="ExcludeScreenReader_Changed" />
                 <Separator />
                 <MenuItem Header="_Engine">
                     <MenuItem x:Name="EngWhisper" Header="_Whisper — accurate, on-device"
                               IsCheckable="True" IsChecked="True" Click="Engine_Click" />
+                    <MenuItem x:Name="EngStreaming" Header="S_treaming — word-by-word, lowest delay, on-device"
+                              IsCheckable="True" Click="Engine_Click" />
                     <MenuItem x:Name="EngSapi" Header="Windows s_peech — instant, mic only"
                               IsCheckable="True" Click="Engine_Click" />
                 </MenuItem>
@@ -97,7 +102,7 @@
                               Tag="LargeV3" IsCheckable="True" Click="Model_Click" />
                 </MenuItem>
                 <Separator />
-                <MenuItem x:Name="MenuDownloadAll" Header="_Download all models (about 7 GB)"
+                <MenuItem x:Name="MenuDownloadAll" Header="_Download all models (about 7.5 GB)"
                           Click="DownloadAllModels_Click" />
                 <MenuItem Header="Clea_r downloaded models"
                           Click="ClearModels_Click" />

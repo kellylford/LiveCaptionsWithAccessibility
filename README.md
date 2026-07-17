@@ -11,9 +11,12 @@ into a **full, scrollable, keyboard-navigable transcript** that screen readers r
 naturally.
 
 It can caption **either your microphone or any audio playing on the PC** (a meeting, a
-video — via WASAPI loopback), using either an **accurate on-device Whisper** engine or
-Windows' instant built-in speech, and presents the result in a fully accessible,
-reviewable transcript.
+video, one specific app), with a choice of four on-device engines — accurate Whisper,
+a true word-by-word **streaming** recognizer, the **Windows on-device (NPU)** recognizer
+on Copilot+ PCs, or Windows' instant built-in speech — and presents the result in a
+fully accessible, reviewable transcript. Because its audience runs screen readers, the
+whole-system capture can **exclude your screen reader's own speech** (on by default),
+so captions cover the meeting, not your reader's narration.
 
 > Everything runs **on-device** — no cloud, no API keys. On a Snapdragon X (ARM64)
 > Copilot+ PC the Whisper CPU runtime is native and comfortably real-time. That's the
@@ -68,18 +71,25 @@ Pick your **Audio source** and **Engine**, then press **Start listening**.
 When **System audio** is selected, the **Application** picker lets you limit capture to a
 single running app (and its child processes) instead of the whole mix — useful for
 captioning one meeting without your music bleeding in. It lists apps that have a window;
-open the dropdown to refresh. Per-app capture uses the Windows 11 process-loopback API and
-runs with the Whisper engine.
+open the dropdown to refresh. Per-app capture uses the Windows 11 process-loopback API.
 
-All three paths are normalized to 16 kHz mono and fed to the same engine, so the
+**Exclude screen reader speech** (Audio menu, on by default) uses process loopback's
+*exclude* mode for the whole-mix case: the running screen reader's process tree
+(NVDA / JAWS / Narrator) is removed from the captured audio, so a screen-reader user can
+caption "everything I hear" without their own reader's voice — or its announcements of
+the captions themselves — polluting the transcript.
+
+All capture paths are normalized to 16 kHz mono and fed to the same engine, so the
 recognizer never knows or cares where the audio came from.
 
 ## Choosing an engine
 
-| Engine | Accuracy | Latency | Notes |
+| Engine | Words appear | Text style | Notes |
 | --- | --- | --- | --- |
-| **Whisper (on-device)** | High | ~1 s (segment-based) | Fully local, works with mic **and** system audio; native on ARM64. First run downloads the model. |
-| **Windows speech (SAPI)** | Modest | Instant | Ships with Windows, zero download, but **microphone only**. |
+| **Whisper (on-device)** | Per phrase, ~1 s behind | Punctuated | Fully local, mic **and** system audio; model picker from Tiny to Large v3. First run downloads the model. |
+| **Streaming (on-device)** | **Word by word, ~½ s behind** | Lowercase | NeMo streaming FastConformer transducer via sherpa-onnx (native win-arm64). Lowest latency, very light CPU (RTF ≈ 0.10 on X Elite). 456 MB one-time download. |
+| **Windows on-device (NPU)** | Per phrase, fast | Punctuated | The OS Live Captions recognizer via `Microsoft.Windows.AI.Speech` — runs on the Hexagon NPU on Copilot+ PCs at near-zero CPU cost, model preinstalled. Requires the MSIX-packaged flavor (`packaging/`), Windows 11 24H2+; API currently experimental, English-only. |
+| **Windows speech (SAPI)** | Word by word, instant | Plain | Ships with Windows, zero download, but **microphone only**. |
 
 ## Keyboard model
 
@@ -118,13 +128,18 @@ turns it into text** are fully decoupled from **how captions are presented**.
 
 ```
 Audio/IAudioCaptureSource   – interface: emits normalized 16 kHz mono float frames
-  ├─ MicrophoneCaptureSource      – WASAPI capture of the default mic
-  └─ SystemAudioCaptureSource     – WASAPI render loopback (everything you hear)
+  ├─ MicrophoneCaptureSource               – WASAPI capture of the default mic
+  ├─ SystemAudioCaptureSource              – WASAPI render loopback (everything you hear)
+  ├─ ProcessAudioCaptureSource             – process loopback: one app + its children
+  └─ SystemAudioExceptProcessCaptureSource – process loopback EXCLUDE mode: everything
+        except one process tree (how the screen reader's voice is removed)
         (downmix to mono + resample to 16 kHz handled in WasapiCaptureSource)
 
 Speech/ICaptionSource       – interface: Start/Stop + PartialRecognized / FinalRecognized / StateChanged
   ├─ WhisperCaptionSource         – on-device Whisper.net; consumes an IAudioCaptureSource,
   │                                 does energy-VAD segmentation, emits interim + final
+  ├─ SherpaCaptionSource          – true-streaming NeMo transducer (word-by-word partials)
+  ├─ WindowsAiCaptionSource       – Windows AI flavor: the OS recognizer (NPU on Copilot+)
   └─ SystemSpeechCaptionSource    – offline SAPI dictation (mic only)
 
 Accessibility/ScreenReader  – speaks text to a screen reader via the UIA Notification event
@@ -135,20 +150,28 @@ TranscriptLine              – one finalized caption = one focusable list item
 The UI depends only on `ICaptionSource`; the engine depends only on
 `IAudioCaptureSource`. You can swap either seam without touching the other.
 
+## NPU acceleration
+
+Done — via the front door. On Copilot+ PCs the **Windows on-device engine** runs the OS
+speech model on the Hexagon NPU through `Microsoft.Windows.AI.Speech` (the sanctioned API
+over the same engine Live Captions uses). It needs MSIX packaging with the
+`systemAIModels` capability and the experimental Windows App SDK channel, so it ships as
+an opt-in flavor: run `packaging\build-windows-ai.ps1` (Developer Mode required) to build
+and register it locally. Whisper-on-NPU directly was evaluated and rejected: whisper.cpp
+has no Hexagon backend on Windows, and hand-building Whisper on ONNX Runtime + QNN buys
+~no speed over the 12-core Oryon CPU — the NPU's real win (power) comes free with the
+Windows API.
+
 ## Making it even better
 
-- **Larger Whisper model** — change `GgmlType.BaseEn` to `SmallEn` in
-  `WhisperCaptionSource` for higher accuracy (bigger download, still real-time on X Elite).
-- **NPU acceleration** — Whisper.net here uses the CPU runtime. The Snapdragon's Hexagon
-  NPU can be targeted via **ONNX Runtime + the QNN execution provider** running a Whisper
-  ONNX model — the same class of on-device acceleration Copilot+ Live Captions uses. That's
-  a larger build (mel-spectrogram + tokenizer + encoder/decoder), but it drops into the same
-  `ICaptionSource` seam.
-- **Punctuation / diarization / language switching** — all live inside the engine class;
-  the accessible UI is unaffected.
+- **Punctuation for the Streaming engine** — a sherpa-onnx online punctuation model would
+  fix its lowercase output; the accessible UI is unaffected.
+- **Diarization / language switching** — all live inside the engine class.
 
 ## Documentation & building
 
+- **[docs/UserGuide.md](docs/UserGuide.md)** — the user guide: keyboard reference, choosing
+  sources and engines, screen-reader exclusion, models, troubleshooting.
 - **[docs/LiveCaptionSpec.md](docs/LiveCaptionSpec.md)** — a formal, build-it-again specification: the design
   principles, the two decoupling seams, the accessibility/keyboard contract, and a
   file-by-file map.

@@ -79,7 +79,8 @@
                           IsCheckable="True" IsChecked="True"
                           Checked="ExcludeScreenReader_Changed" Unchecked="ExcludeScreenReader_Changed" />
                 <Separator />
-                <MenuItem Header="_Engine">
+                <MenuItem x:Name="MenuEngine" Header="_Engine"
+                          SubmenuOpened="MenuEngine_SubmenuOpened">
                     <MenuItem x:Name="EngWhisper" Header="_Whisper — accurate, on-device"
                               IsCheckable="True" IsChecked="True" Click="Engine_Click" />
                     <MenuItem x:Name="EngStreaming" Header="S_treaming — word-by-word, lowest delay, on-device"

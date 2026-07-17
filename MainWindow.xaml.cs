@@ -119,13 +119,7 @@ public partial class MainWindow : Window
         _engWindowsAi.Click += Engine_Click;
         if (EngSapi.Parent is MenuItem engineMenu)
             engineMenu.Items.Insert(engineMenu.Items.IndexOf(EngSapi), _engWindowsAi);
-        var winAiUnavailable = WindowsAiCaptionSource.DescribeUnavailability();
-        if (winAiUnavailable is not null)
-        {
-            _engWindowsAi.IsEnabled = false;
-            _engWindowsAi.ToolTip = winAiUnavailable;
-            System.Windows.Automation.AutomationProperties.SetHelpText(_engWindowsAi, winAiUnavailable);
-        }
+        var winAiUnavailable = UpdateWindowsAiMenuItem();
 #endif
 
         // Reflect the default selections (system audio + Whisper) in menu enablement,
@@ -301,6 +295,31 @@ public partial class MainWindow : Window
             _ => "Windows speech engine: instant, microphone only."
         });
     }
+
+    // Availability of the Windows on-device engine can only be judged definitively at
+    // certain moments (the first probe at startup can fail transiently), so re-check
+    // whenever the Engine submenu opens rather than trusting one startup answer.
+    private void MenuEngine_SubmenuOpened(object sender, RoutedEventArgs e)
+    {
+#if WINDOWS_AI
+        UpdateWindowsAiMenuItem();
+#endif
+    }
+
+#if WINDOWS_AI
+    /// <summary>Returns the unavailability reason, or null when the engine is offered.</summary>
+    private string? UpdateWindowsAiMenuItem()
+    {
+        if (_engWindowsAi is null)
+            return null;
+
+        var reason = WindowsAiCaptionSource.DescribeDefinitiveUnavailability();
+        _engWindowsAi.IsEnabled = reason is null;
+        _engWindowsAi.ToolTip = reason;
+        System.Windows.Automation.AutomationProperties.SetHelpText(_engWindowsAi, reason ?? "");
+        return reason;
+    }
+#endif
 
     private void UpdateAudioMenuState()
     {

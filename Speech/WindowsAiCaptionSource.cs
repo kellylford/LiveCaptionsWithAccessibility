@@ -51,7 +51,7 @@ public sealed class WindowsAiCaptionSource : ICaptionSource
     /// </summary>
     public static string? DescribeUnavailability()
     {
-        if (!HasPackageIdentity())
+        if (!HasPackageIdentity)
             return "The Windows recognizer needs the packaged (MSIX) version of this app.";
 
         try
@@ -69,6 +69,35 @@ public sealed class WindowsAiCaptionSource : ICaptionSource
         catch (Exception ex)
         {
             return "The Windows on-device recognizer is not available: " + ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Like <see cref="DescribeUnavailability"/>, but only reports reasons that are
+    /// definitive. The very first call into the Windows AI runtime can fail
+    /// transiently during app startup; a menu item must not be permanently disabled
+    /// over that, so transient errors read as "available" here and Start() surfaces
+    /// the real error if one persists.
+    /// </summary>
+    public static string? DescribeDefinitiveUnavailability()
+    {
+        if (!HasPackageIdentity)
+            return "The Windows recognizer needs the packaged (MSIX) version of this app.";
+
+        try
+        {
+            return SpeechRecognitionModel.GetReadyState() switch
+            {
+                AIFeatureReadyState.NotSupportedOnCurrentSystem =>
+                    "This PC does not support the Windows on-device recognizer (requires Windows 11 24H2 or later).",
+                AIFeatureReadyState.DisabledByUser =>
+                    "The Windows on-device recognizer is disabled in Settings > System > AI components.",
+                _ => null
+            };
+        }
+        catch
+        {
+            return null; // Unknown ≠ unavailable.
         }
     }
 
@@ -171,11 +200,15 @@ public sealed class WindowsAiCaptionSource : ICaptionSource
     private void OnCaptureFailed(object? sender, string message) =>
         SetState(CaptionState.Error, message);
 
-    private static bool HasPackageIdentity()
+    /// <summary>False when running unpackaged (no MSIX identity).</summary>
+    public static bool HasPackageIdentity
     {
-        int length = 0;
-        // APPMODEL_ERROR_NO_PACKAGE (15700) when running unpackaged.
-        return GetCurrentPackageFullName(ref length, null) != 15700;
+        get
+        {
+            int length = 0;
+            // APPMODEL_ERROR_NO_PACKAGE (15700) when running unpackaged.
+            return GetCurrentPackageFullName(ref length, null) != 15700;
+        }
     }
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]

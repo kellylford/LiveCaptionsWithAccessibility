@@ -30,7 +30,7 @@
 
   <ItemGroup>
     <!-- Offline mic-only quick engine -->
-    <PackageReference Include="System.Speech" Version="8.0.0" />
+    <PackageReference Include="System.Speech" Version="10.0.10" />
     <!-- System-audio + microphone capture (WASAPI); pure-managed, works on ARM64 -->
     <PackageReference Include="NAudio" Version="2.2.1" />
     <!-- On-device high-accuracy speech-to-text; CPU runtime supports win-arm64 -->

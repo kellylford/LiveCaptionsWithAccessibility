@@ -34,8 +34,8 @@
     <!-- System-audio + microphone capture (WASAPI); pure-managed, works on ARM64 -->
     <PackageReference Include="NAudio" Version="2.2.1" />
     <!-- On-device high-accuracy speech-to-text; CPU runtime supports win-arm64 -->
-    <PackageReference Include="Whisper.net" Version="1.8.1" />
-    <PackageReference Include="Whisper.net.Runtime" Version="1.8.1" />
+    <PackageReference Include="Whisper.net" Version="1.9.1" />
+    <PackageReference Include="Whisper.net.Runtime" Version="1.9.1" />
     <!-- On-device true-streaming speech-to-text (word-by-word captions); native win-arm64 -->
     <PackageReference Include="org.k2fsa.sherpa.onnx" Version="1.13.4" />
     <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.win-arm64" Version="1.13.4" />

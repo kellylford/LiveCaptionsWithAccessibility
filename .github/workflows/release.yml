@@ -17,9 +17,13 @@ name: Release
 # repo:kellylford/LiveCaptionsWithAccessibility:environment:azure-signing.
 # If the secrets are absent the workflow still publishes, unsigned, and says so.
 
+# Run it manually (Actions ▸ Release ▸ Run workflow) to build and sign WITHOUT
+# publishing anything: the artifacts are attached to the run so you can download
+# them and confirm the signature. Use that to prove signing works before tagging.
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: write   # softprops/action-gh-release needs this to create the release
@@ -47,18 +51,25 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      # The release tag is the single source of truth for the version. It must match
-      # the csproj <Version> so the published build can never mis-report itself.
-      - name: Verify tag matches csproj version
+      # On a tag the tag is the single source of truth for the version, and it must
+      # match the csproj <Version> so a published build can never mis-report itself.
+      # On a manual run there is no tag, so the csproj version is used as-is.
+      - name: Determine version
+        id: version
         shell: pwsh
         run: |
-          $tag = '${{ github.ref_name }}'.TrimStart('v')
           $value = (Select-Xml -Path AccessibleLiveCaptions.csproj `
                       -XPath "/Project/PropertyGroup/Version").Node.InnerText
-          if ($tag -ne $value) {
-            throw "Tag version '$tag' does not match csproj <Version> '$value'. Update the csproj or re-tag."
+          if ('${{ github.ref_type }}' -eq 'tag') {
+            $tag = '${{ github.ref_name }}'.TrimStart('v')
+            if ($tag -ne $value) {
+              throw "Tag version '$tag' does not match csproj <Version> '$value'. Update the csproj or re-tag."
+            }
+            Write-Host "Tag $tag matches csproj <Version>."
+          } else {
+            Write-Host "Manual run - building version $value without publishing a release."
           }
-          Write-Host "Tag $tag matches csproj <Version>."
+          "version=$value" | Out-File $env:GITHUB_OUTPUT -Append
 
       - name: Decide whether signing is configured
         id: signing
@@ -106,7 +117,7 @@ jobs:
           # character-identical to the signing certificate's subject (mismatch =
           # error 0x8007000b at signing time).
           [xml]$xml = Get-Content $manifest
-          $xml.Package.Identity.Version = '${{ github.ref_name }}'.TrimStart('v') + '.0'
+          $xml.Package.Identity.Version = '${{ steps.version.outputs.version }}' + '.0'
           $xml.Save((Resolve-Path $manifest))
           Write-Host "Identity: $($xml.Package.Identity.Name) $($xml.Package.Identity.Version) / $($xml.Package.Identity.Publisher)"
 
@@ -150,7 +161,7 @@ jobs:
           if (-not $makeappx) { throw "makeappx.exe not found on the runner." }
           Write-Host "Using $($makeappx.FullName)"
 
-          $msix = "AccessibleLiveCaptions-${{ github.ref_name }}-win-arm64.msix"
+          $msix = "AccessibleLiveCaptions-v${{ steps.version.outputs.version }}-win-arm64.msix"
           & $makeappx.FullName pack /d publish-msix /p $msix /o
           if ($LASTEXITCODE -ne 0) { throw "makeappx pack failed." }
           "MSIX=$msix" | Out-File $env:GITHUB_ENV -Append
@@ -172,14 +183,41 @@ jobs:
       - name: Package portable zip
         shell: pwsh
         run: |
-          $zip = "AccessibleLiveCaptions-${{ github.ref_name }}-win-arm64-portable.zip"
+          $zip = "AccessibleLiveCaptions-v${{ steps.version.outputs.version }}-win-arm64-portable.zip"
           Compress-Archive -Path publish-portable/* -DestinationPath $zip -Force
           "ZIP=$zip" | Out-File $env:GITHUB_ENV -Append
+
+      # Report what the signature actually says, so a dry run proves signing end to
+      # end rather than merely not failing.
+      - name: Verify signatures
+        shell: pwsh
+        run: |
+          foreach ($f in @($env:MSIX, $env:ZIP_EXE)) {
+            if (-not $f) { continue }
+            $sig = Get-AuthenticodeSignature $f
+            Write-Host "$f`n  status:  $($sig.Status)`n  subject: $($sig.SignerCertificate.Subject)"
+          }
+        env:
+          ZIP_EXE: publish-portable\AccessibleLiveCaptions.exe
+
+      # Manual runs stop here: the artifacts are attached to the run for inspection
+      # and nothing is published.
+      - name: Upload artifacts (manual run)
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: AccessibleLiveCaptions-v${{ steps.version.outputs.version }}
+          path: |
+            ${{ env.MSIX }}
+            ${{ env.ZIP }}
+          if-no-files-found: error
+          retention-days: 14
 
       # Release notes come from docs/release-notes-<tag>.md (e.g. release-notes-v0.2.0.md).
       # fail_on_unmatched_files makes a missing asset fail the release rather than
       # publish an incomplete one.
       - name: Publish GitHub Release
+        if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
           name: Accessible Live Captions ${{ github.ref_name }}

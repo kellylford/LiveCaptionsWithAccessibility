@@ -45,7 +45,8 @@
              not Tab. IsTabStop=False keeps the bar itself out of the tab sequence;
              TabNavigation=None lets Tab pass over its items instead of into them.
              Alt/F10 activation and arrow navigation are provided by WPF's Menu. -->
-        <Menu DockPanel.Dock="Top"
+        <Menu x:Name="MenuBar"
+              DockPanel.Dock="Top"
               IsTabStop="False"
               KeyboardNavigation.TabNavigation="None"
               Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
@@ -117,6 +118,33 @@
                           Command="{x:Static local:MainWindow.DecreaseFontCommand}"
                           InputGestureText="Ctrl+Minus" />
                 <Separator />
+                <!-- Presentation: the same captions, two surfaces. Panel mode hides the
+                     transcript and shows one caption at a time (what the built-in Live
+                     Captions does), but keeps every line in memory and keeps announcing
+                     finalized captions, so nothing is lost by switching. -->
+                <MenuItem Header="_Presentation" InputGestureText="F7">
+                    <!-- Driven by Checked/Unchecked, not Click: automation clients such as
+                         Voice Access switch this through the UIA Toggle pattern, which
+                         changes IsChecked without ever raising Click. -->
+                    <MenuItem x:Name="MenuPresentTranscript"
+                              Header="_Transcript — full, reviewable history"
+                              IsCheckable="True" IsChecked="True"
+                              Checked="Presentation_Changed" Unchecked="Presentation_Changed" />
+                    <MenuItem x:Name="MenuPresentPanel"
+                              Header="_Panel — one caption at a time"
+                              IsCheckable="True"
+                              Checked="Presentation_Changed" Unchecked="Presentation_Changed" />
+                </MenuItem>
+                <MenuItem Header="Pre_vious caption"
+                          Command="{x:Static local:MainWindow.PanelPreviousCommand}"
+                          InputGestureText="Alt+Up" />
+                <MenuItem Header="Ne_xt caption"
+                          Command="{x:Static local:MainWindow.PanelNextCommand}"
+                          InputGestureText="Alt+Down" />
+                <MenuItem Header="_Follow live captions"
+                          Command="{x:Static local:MainWindow.FollowLiveCommand}"
+                          InputGestureText="Alt+End" />
+                <Separator />
                 <MenuItem x:Name="MenuShowTimestamps" Header="Show _timestamps"
                           IsCheckable="True" IsChecked="False"
                           Checked="ShowTimestamps_Changed" Unchecked="ShowTimestamps_Changed" />
@@ -160,8 +188,11 @@
             </StackPanel>
         </Border>
 
+        <!-- Exactly one presentation is visible at a time; both render the same _lines. -->
+        <Grid>
+
         <!-- ==================== Transcript (the core: full, scrollable history) ==================== -->
-        <Grid Margin="12,10,12,8">
+        <Grid x:Name="TranscriptView" Margin="12,10,12,8">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
@@ -217,6 +248,74 @@
                     </DataTemplate>
                 </ListBox.ItemTemplate>
             </ListBox>
+        </Grid>
+
+        <!-- ==================== Panel (one caption at a time) ==================== -->
+        <!-- Deliberately has no focusable caption element: the caption text is delivered
+             by the same UIA notification that transcript mode uses, so a screen reader
+             hears each finalized line exactly once. Giving this TextBlock focus would
+             make its Name change on every new caption, which some screen readers read
+             as well — the announcement would arrive twice. -->
+        <Grid x:Name="PanelView" Margin="12,10,12,8" Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Label Grid.Row="0"
+                   Content="Caption"
+                   FontWeight="Bold"
+                   Margin="0,0,0,4"
+                   AutomationProperties.HeadingLevel="Level2" />
+
+            <Border Grid.Row="1"
+                    BorderThickness="1"
+                    BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
+                    Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+                    Padding="16">
+                <!-- No AutomationProperties.Name: a TextBlock's own text becomes its
+                     accessible name, so the caption reads as itself. -->
+                <TextBlock x:Name="PanelCaption"
+                           Text="—"
+                           FontSize="32"
+                           TextWrapping="Wrap"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+            </Border>
+
+            <!-- Controls for mouse and low-vision users. IsTabStop=False keeps the
+                 "no tab stops anywhere" rule: the keyboard path is Alt+Up/Down/End and
+                 the View menu, and these stay clickable and exposed to UIA regardless. -->
+            <DockPanel Grid.Row="2" Margin="0,8,0,0" LastChildFill="False">
+                <Button x:Name="PanelPrev" DockPanel.Dock="Left"
+                        Content="◀ Previous" AutomationProperties.Name="Previous caption"
+                        IsTabStop="False" Focusable="False" Padding="12,4" Margin="0,0,6,0"
+                        Command="{x:Static local:MainWindow.PanelPreviousCommand}"
+                        Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
+                        Foreground="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}" />
+                <Button x:Name="PanelNext" DockPanel.Dock="Left"
+                        Content="Next ▶" AutomationProperties.Name="Next caption"
+                        IsTabStop="False" Focusable="False" Padding="12,4" Margin="0,0,6,0"
+                        Command="{x:Static local:MainWindow.PanelNextCommand}"
+                        Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
+                        Foreground="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}" />
+                <Button x:Name="PanelLive" DockPanel.Dock="Left"
+                        Content="Follow live" AutomationProperties.Name="Follow live captions"
+                        IsTabStop="False" Focusable="False" Padding="12,4"
+                        Command="{x:Static local:MainWindow.FollowLiveCommand}"
+                        Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
+                        Foreground="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}" />
+                <!-- No AutomationProperties.Name here either: a static name would hide the
+                     live text ("Live — 8 captions" / "Caption 3 of 8 — paused") from a
+                     screen reader, which is the only part worth reading. -->
+                <TextBlock x:Name="PanelPosition" DockPanel.Dock="Right"
+                           Text="No captions yet"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" />
+            </DockPanel>
+        </Grid>
+
         </Grid>
 
     </DockPanel>

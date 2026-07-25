@@ -27,7 +27,7 @@ so captions cover the meeting, not your reader's narration.
 
 | Problem with built-in Live Captions | What this demo does |
 | --- | --- |
-| Only a few words visible; history is gone | **Scrollable transcript ListBox** holding the entire session |
+| Only a few words visible; history is gone | **Scrollable transcript ListBox** holding the entire session — and if you *want* the compact one-line panel, `F7` gives you that **over the same kept history** |
 | Can't review with a screen reader | Every finalized line is its **own focusable list item** — arrow up/down, Home/End to review line by line |
 | Silent to screen readers | New captions are spoken via the **UIA Notification event** (Narrator/NVDA/JAWS), and it's **toggleable** so you control verbosity |
 | Tiny fixed text | **Adjustable caption size** (Ctrl +/−, 14–48pt) |
@@ -37,6 +37,19 @@ so captions cover the meeting, not your reader's narration.
 Interim ("still deciding") words appear under **Now hearing** but are *not*
 announced on every change — that would flood a screen reader. Only settled lines are
 announced.
+
+### You don't have to choose between the panel and the transcript
+
+`F7` (or **View ▸ Presentation**) switches between the full transcript and a **panel**
+that shows one caption at a time in large text — the compact presentation the built-in
+feature uses. The difference is what happens underneath: the panel keeps every caption,
+keeps announcing each finalized line through the same UI Automation notification, and
+lets you step back through history with the arrow keys. Switch back to the transcript
+and the entire session is still there.
+
+That is the argument for Microsoft in one keystroke: **the compact presentation and an
+accessible one are not a trade-off.** Keeping the text costs nothing and makes the
+panel reviewable.
 
 ## Install
 
@@ -115,6 +128,7 @@ through toolbars.
 | --- | --- |
 | Review lines | `↑` `↓` `Home` `End` |
 | Open the menu bar | `Alt` or `F10`, then arrow keys |
+| Switch transcript / panel | `F7` |
 | Start / stop listening | `Ctrl+R` |
 | Larger / smaller text | `Ctrl +` / `Ctrl −` |
 | Toggle screen-reader announcements | `F8` |

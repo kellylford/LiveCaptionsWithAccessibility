@@ -304,6 +304,23 @@ naming (`ggml-<GgmlType>.bin` locally; the Hugging Face filename mapping lives o
   container itself, it is pushed onto an item so arrows work immediately. `Tab`/`Shift+Tab`
   are swallowed; when the transcript is empty, arrows are swallowed too so focus can't wander.
   Menu bar is reached with `Alt`/`F10`, `IsTabStop=False`, `TabNavigation=None`.
+- **Presentation (transcript / panel)** — A rendering choice, never a data or announcement
+  choice. `_lines` is the single source of truth for both, so switching is lossless, and
+  finalized captions keep going out on the same `captions` notification, so panel mode
+  sounds identical. Panel mode has **no focusable caption element** on purpose: focusing it
+  would make its automation Name change on every caption, which some screen readers read —
+  the line would be announced twice. Its Previous/Next/Follow-live buttons are
+  `IsTabStop=False` *and* `Focusable=False`: clickable and exposed to UIA, never focus.
+  Panel navigation announces on its own activity id (`panel`) with `interrupt: true`, so
+  holding an arrow key supersedes rather than queues, and it never cancels queued captions.
+  Auto-follow pauses the moment the user steps back — the panel's version of "new captions
+  never steal your place".
+- **Automation patterns, not just clicks** — Checkable menu items must act on
+  `Checked`/`Unchecked`, not `Click`. WPF exposes them via the UIA Toggle pattern, and
+  `Toggle()` changes `IsChecked` without raising `Click`; **Windows Voice Access** drives
+  controls that way, so a click-only handler shows a checkmark while the setting never
+  changed. `Presentation_Changed` is the reference implementation (reentrancy-guarded while
+  it syncs the sibling item).
 - **Live region** — Status text is `LiveSetting="Polite"` as a visual/AT backstop in addition
   to the notification events.
 - **Color** — No information conveyed by color alone. All brushes are system colors, so High

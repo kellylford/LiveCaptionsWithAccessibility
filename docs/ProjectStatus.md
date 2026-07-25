@@ -3,7 +3,7 @@
 > Written for a person or AI agent picking this project up cold — especially on a
 > **different machine** where it has never run. It records what the project is, what
 > state it is in, how to build and release it, and the hardware-specific traps that
-> have already cost time. Last updated for **v0.3.0** (July 2026).
+> have already cost time. Last updated for **v0.4.0** (July 2026).
 >
 > Companion documents: [UserGuide.md](UserGuide.md) for end users,
 > [LiveCaptionSpec.md](LiveCaptionSpec.md) for the design rationale and a
@@ -28,10 +28,10 @@ Microsoft — it is a proof that this is straightforward on a Copilot+ PC today.
 | | |
 |---|---|
 | Repo | `kellylford/LiveCaptionsWithAccessibility` |
-| Current release | **v0.3.0** — signed MSIX + signed portable zip |
+| Current release | **v0.4.0** — signed MSIX + signed portable zip |
 | Runtime | **.NET 10 LTS** (built with SDK 10.0.302) |
 | Architecture | **win-arm64 only** — see §7, this matters a lot |
-| UI | WPF, single window, menu-bar driven |
+| UI | WPF, single window, menu-bar driven; two presentations (transcript / panel) |
 | Engines | 4 (see §4) |
 | Code signing | Azure Artifact Signing via GitHub OIDC — working, verified |
 | Distribution | GitHub Releases; MSIX installs by double-click, no Developer Mode |
@@ -55,6 +55,11 @@ Speech/ICaptionSource       — Start/Stop + PartialRecognized/FinalRecognized/S
 
 The UI depends only on `ICaptionSource`; the engines depend only on
 `IAudioCaptureSource`. Adding an engine or a capture source should not touch the UI.
+
+Since v0.4.0 there is also a **presentation** choice inside the UI — transcript or panel
+(View ▸ Presentation, `F7`). It is a rendering choice only: `_lines` is the single source
+of truth in both, and both announce finalized captions through the same notification, so
+switching never loses text and never changes what a screen reader hears.
 
 Everything else worth knowing is in [LiveCaptionSpec.md](LiveCaptionSpec.md) §12,
 which maps every file to its responsibility.
@@ -178,6 +183,7 @@ Then, in order:
 
 | Symptom | Cause / fix |
 |---|---|
+| **Installer sits at 0% forever, no error, no progress** | The AppX deployment **queue has stopped dispatching** — the request is stuck behind something else, not failing. See §7.1; a reboot clears it. **A healthy install of this package takes under one second**, so any wait beyond a few seconds is this, not a slow install. |
 | SmartScreen warns on download or first run | Expected. The release is signed, but reputation accrues per-publisher over many downloads; Microsoft says weeks and hundreds of installs. Choose **More info** → **Run anyway**. |
 | MSIX won't install, `ResourceExists` | Another copy with the same identity is registered. `Get-AppxPackage -Name AccessibleLiveCaptions \| Remove-AppxPackage` |
 | MSIX won't install, untrusted / certificate error | The signature or its timestamp is broken. Verify: `Get-AuthenticodeSignature .\file.msix` should report `Valid`. |
@@ -186,6 +192,45 @@ Then, in order:
 | NPU engine hangs at "Loading the Windows on-device recognizer" | Normal on first use — allow **up to ~60 s**. On non-Copilot+ hardware Windows downloads the model via Windows Update first, which is slower. |
 | Long pause on first start of Whisper/Streaming | One-time model download. Status line reports progress. Streaming is 456 MB. |
 | Captions say "soft music", "keyboard clicking", "(gentle music)" with no real text | The recognizer is being fed **digital silence** and hallucinating. Almost always the dead-tap problem — see §8. |
+
+### 7.1 The installer that sits at 0%
+
+Observed twice on the reference-class hardware (Surface Laptop 7, Snapdragon X1E80100,
+build 26300), costing 15 minutes on one attempt and 8 on the next. **Nothing was wrong
+with the package**: right architecture, `Get-AuthenticodeSignature` reported `Valid`, no
+conflicting package installed, App Installer present and running. The request simply
+never got dispatched.
+
+Confirm it from the deployment log:
+
+```powershell
+Get-WinEvent -LogName Microsoft-Windows-AppXDeploymentServer/Operational -MaxEvents 40 |
+  Select-Object TimeCreated, Id, @{n='M';e={($_.Message -split "`n")[0]}}
+```
+
+The signature of the problem is an event **603** ("Started deployment Add operation")
+with **no matching 607** ("has been de-queued and is running") minutes later. Queued but
+never dispatched — which is exactly what a progress bar stuck at 0% represents. Look for
+an unrelated **685** ("time limit exceeded") on a Windows package-provisioning batch
+holding the pipeline; in the observed case it was an `OnDemandRegisterOperation` for nine
+`WindowsWorkload.*.Qnn` AI packages that never completed. Delivery Optimization was
+simultaneously stalled at 0 bytes/sec with 1.5 GB queued.
+
+**Fix: reboot.** After the reboot the same file installed in **844 ms** (event 613
+reports the timing). The blocking batch ran and failed fast instead of hanging.
+
+Two things worth remembering:
+
+- **This package has no `PackageDependency`** — the manifest declares only a
+  `TargetDeviceFamily`, because `build-windows-ai.ps1` publishes with
+  `WindowsAppSDKSelfContained=true`. Installation is therefore entirely local and needs
+  zero network. A stalled download queue can block it only by occupying the deployment
+  pipeline, never because the package is waiting on a download.
+- Because a healthy install is sub-second, **any wait at all is this problem**. Do not
+  sit through it a third time; check the log.
+
+`Add-AppxPackage -Path .\<file>.msix` is still the better install path — it reports real
+error text instead of a modal, and it is keyboard-only.
 
 ## 8. Hardware-dependent behavior that has already burned time
 
@@ -224,6 +269,17 @@ Verified on the reference machine at v0.3.0, on .NET 10:
 - Windows on-device NPU — punctuated captions ~29 s after launch, packaged flavor
 - Both flavors build with zero warnings
 - Signing pipeline end-to-end; the **published** MSIX downloaded fresh reports `Valid` and installs
+
+Added at v0.4.0, verified on a second machine (Surface Laptop 7, X1E80100, build 26300):
+
+- Panel mode driven end to end through UI Automation — the interface a screen reader
+  uses. Entering panel mode removes `TranscriptList` from the accessibility tree and
+  shows the newest caption; Previous steps back and reports "Caption 6 of 8 — paused";
+  Follow live returns to "Live — 8 captions"; switching back to Transcript restores all
+  8 lines and lands focus on the first. Heard working with JAWS.
+- The `LIVECAPTIONS_SEED=1` aid makes this testable with no audio, and the whole check
+  scripts from PowerShell via `System.Windows.Automation` — worth reusing, since it
+  exercises the same tree a screen reader reads rather than the pixels.
 
 Not verified:
 

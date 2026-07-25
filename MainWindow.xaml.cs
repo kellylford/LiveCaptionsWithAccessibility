@@ -44,12 +44,40 @@ public partial class MainWindow : Window
         new("Toggle screen-reader announcements", nameof(ToggleAnnounceCommand), typeof(MainWindow),
             [new KeyGesture(Key.F8)]);
 
+    public static readonly RoutedUICommand TogglePresentationCommand =
+        new("Switch between transcript and panel", nameof(TogglePresentationCommand), typeof(MainWindow),
+            [new KeyGesture(Key.F7)]);
+
+    // Panel navigation. Alt+arrow rather than a bare arrow because in transcript mode
+    // the arrows belong to the list; a bare-arrow InputGesture would hijack it. Bare
+    // arrows still work in panel mode — see the PreviewKeyDown handler, where nothing
+    // else is competing for them.
+    public static readonly RoutedUICommand PanelPreviousCommand =
+        new("Previous caption", nameof(PanelPreviousCommand), typeof(MainWindow),
+            [new KeyGesture(Key.Up, ModifierKeys.Alt)]);
+
+    public static readonly RoutedUICommand PanelNextCommand =
+        new("Next caption", nameof(PanelNextCommand), typeof(MainWindow),
+            [new KeyGesture(Key.Down, ModifierKeys.Alt)]);
+
+    public static readonly RoutedUICommand FollowLiveCommand =
+        new("Follow live captions", nameof(FollowLiveCommand), typeof(MainWindow),
+            [new KeyGesture(Key.End, ModifierKeys.Alt)]);
+
     // ---- State ----------------------------------------------------------------
     private readonly ObservableCollection<TranscriptLine> _lines = new();
     private ICaptionSource? _captions;
     private double _captionFontSize = 22;
     private const double MinFont = 14;
     private const double MaxFont = 48;
+
+    // Panel presentation: the transcript is hidden and one caption is shown at a time.
+    // _lines is still the single source of truth, so switching back restores everything.
+    // _panelIndex is which line the panel is showing; _followLive means "stay on the
+    // newest", which is the default so the panel keeps up with the audio unattended.
+    private bool _panelMode;
+    private int _panelIndex = -1;
+    private bool _followLive = true;
 
     // Selected application for per-app system-audio capture (null = whole system mix).
     private int? _selectedAppPid;
@@ -86,6 +114,13 @@ public partial class MainWindow : Window
         CommandBindings.Add(new CommandBinding(IncreaseFontCommand, (_, _) => AdjustFont(+2)));
         CommandBindings.Add(new CommandBinding(DecreaseFontCommand, (_, _) => AdjustFont(-2)));
         CommandBindings.Add(new CommandBinding(ToggleAnnounceCommand, (_, _) => MenuAnnounce.IsChecked = !MenuAnnounce.IsChecked));
+        CommandBindings.Add(new CommandBinding(TogglePresentationCommand, (_, _) => SetPresentation(!_panelMode)));
+        CommandBindings.Add(new CommandBinding(PanelPreviousCommand, (_, _) => StepPanel(-1),
+            (_, e) => e.CanExecute = _panelMode && _panelIndex > 0));
+        CommandBindings.Add(new CommandBinding(PanelNextCommand, (_, _) => StepPanel(+1),
+            (_, e) => e.CanExecute = _panelMode && _panelIndex >= 0 && _panelIndex < _lines.Count - 1));
+        CommandBindings.Add(new CommandBinding(FollowLiveCommand, (_, _) => FollowLive(),
+            (_, e) => e.CanExecute = _panelMode && !_followLive));
 
         // The transcript is the only focusable control. When focus reaches the list
         // container itself, push it onto an item so the arrows work immediately.
@@ -98,9 +133,27 @@ public partial class MainWindow : Window
         PreviewKeyDown += (_, e) =>
         {
             if (e.Key == Key.Tab)
+            {
                 e.Handled = true;
-            else if (_lines.Count == 0 && TranscriptList.IsKeyboardFocusWithin
-                     && e.Key is Key.Up or Key.Down or Key.Left or Key.Right)
+                return;
+            }
+
+            // Panel mode has no focusable content, so the bare arrows are free: use them
+            // to step through history the way they step through the transcript's list.
+            // Skipped while the menu bar has focus, where the arrows navigate the menu.
+            if (_panelMode && !MenuBar.IsKeyboardFocusWithin)
+            {
+                switch (e.Key)
+                {
+                    case Key.Up or Key.Left or Key.PageUp: StepPanel(-1); e.Handled = true; return;
+                    case Key.Down or Key.Right or Key.PageDown: StepPanel(+1); e.Handled = true; return;
+                    case Key.Home: ShowPanelLine(0, fromUser: true); e.Handled = true; return;
+                    case Key.End: FollowLive(); e.Handled = true; return;
+                }
+            }
+
+            if (_lines.Count == 0 && TranscriptList.IsKeyboardFocusWithin
+                && e.Key is Key.Up or Key.Down or Key.Left or Key.Right)
                 e.Handled = true;
         };
 
@@ -621,6 +674,18 @@ public partial class MainWindow : Window
             if (!TranscriptList.IsKeyboardFocusWithin)
                 TranscriptList.ScrollIntoView(line);
 
+            // Panel mode's equivalent: advance to the new line only while following live,
+            // so stepping back to re-read something isn't undone by the next caption.
+            // fromUser:false — this line is already being announced below; announcing it
+            // again from the panel would say it twice.
+            if (_panelMode)
+            {
+                if (_followLive)
+                    ShowPanelLine(_lines.Count - 1, fromUser: false);
+                else
+                    UpdatePanelChrome(); // the count changed even though the view didn't
+            }
+
             if (AnnounceCaptions)
             {
                 // interrupt:false so each finalized line is queued and spoken in order.
@@ -634,6 +699,8 @@ public partial class MainWindow : Window
     {
         _lines.Clear();
         InterimText.Text = "—";
+        _followLive = true;
+        ShowPanelLine(-1, fromUser: false);
         SetStatus("Transcript cleared.");
     }
 
@@ -677,6 +744,7 @@ public partial class MainWindow : Window
         _captionFontSize = Math.Clamp(_captionFontSize + delta, MinFont, MaxFont);
         TranscriptList.FontSize = _captionFontSize;
         InterimText.FontSize = _captionFontSize;
+        PanelCaption.FontSize = _captionFontSize + PanelFontBoost;
         SetStatus($"Caption text size: {_captionFontSize:0} point.");
     }
 
@@ -710,6 +778,131 @@ public partial class MainWindow : Window
             Dispatcher.BeginInvoke(new Action(FocusTranscriptStart));
     }
 
+    // ---- Presentation: transcript vs. panel ------------------------------------
+    // Panel mode is what the built-in Live Captions does — one caption at a time, no
+    // history on screen. It is a *rendering* choice only: _lines keeps accumulating, so
+    // switching back to the transcript brings the whole session with it, and finalized
+    // captions are still announced through the same notification path, so a screen-reader
+    // user loses nothing by using it.
+
+    // The panel shows a single line, so it can afford to be larger than the transcript's.
+    private const double PanelFontBoost = 10;
+
+    // Set while SetPresentation syncs the two menu checkmarks, so the resulting
+    // Checked/Unchecked events don't re-enter.
+    private bool _syncingPresentationMenu;
+
+    private void Presentation_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded || _syncingPresentationMenu)
+            return;
+
+        // Radio semantics from whichever item changed: checking "Panel" and unchecking
+        // "Transcript" both mean panel, and vice versa.
+        var item = (MenuItem)sender;
+        SetPresentation(ReferenceEquals(item, MenuPresentPanel) ? item.IsChecked : !item.IsChecked);
+    }
+
+    private void SetPresentation(bool panel)
+    {
+        _panelMode = panel;
+        PanelView.Visibility = panel ? Visibility.Visible : Visibility.Collapsed;
+        TranscriptView.Visibility = panel ? Visibility.Collapsed : Visibility.Visible;
+
+        _syncingPresentationMenu = true;
+        try
+        {
+            MenuPresentPanel.IsChecked = panel;
+            MenuPresentTranscript.IsChecked = !panel;
+        }
+        finally { _syncingPresentationMenu = false; }
+
+        if (panel)
+        {
+            // Entering the panel always starts live, at the newest caption.
+            _followLive = true;
+            ShowPanelLine(_lines.Count - 1, fromUser: false);
+
+            // Focus was on a transcript item that is now collapsed. Park it on the window
+            // so it is not stranded on a hidden control; nothing in the panel takes focus.
+            Focus();
+            SetStatus(_lines.Count == 0
+                ? "Panel mode. One caption at a time. Press F7 for the full transcript."
+                : $"Panel mode. All {_lines.Count} captions are kept — press F7 to review them.");
+        }
+        else
+        {
+            SetStatus($"Transcript mode. {_lines.Count} captions.");
+            // After the visibility change, so the list has containers to focus.
+            Dispatcher.BeginInvoke(new Action(FocusTranscriptStart));
+        }
+
+        CommandManager.InvalidateRequerySuggested();
+    }
+
+    /// <summary>
+    /// Show <paramref name="index"/> in the panel. <paramref name="fromUser"/> marks a
+    /// deliberate move (arrows, buttons, menu) — those announce the line they landed on
+    /// and decide whether to keep following live. Automatic advances pass false, because
+    /// the arriving caption is already announced by <see cref="OnFinal"/>.
+    /// </summary>
+    private void ShowPanelLine(int index, bool fromUser)
+    {
+        if (_lines.Count == 0)
+        {
+            _panelIndex = -1;
+            PanelCaption.Text = "—";
+            UpdatePanelChrome();
+            return;
+        }
+
+        index = Math.Clamp(index, 0, _lines.Count - 1);
+        _panelIndex = index;
+        var line = _lines[index];
+        PanelCaption.Text = ShowTimestamps ? $"[{line.Timestamp}] {line.Text}" : line.Text;
+
+        if (fromUser)
+        {
+            // Landing on the newest line means "caught up", so resume following.
+            _followLive = index == _lines.Count - 1;
+            // interrupt:true on its own activity id: holding an arrow key down supersedes
+            // rather than queues, so stepping fast can't flood the screen reader, and it
+            // never cancels the queued caption announcements.
+            ScreenReader.Announce(this,
+                _followLive ? $"{line.Text}. Following live." : $"{line.Text}. Caption {index + 1} of {_lines.Count}.",
+                interrupt: true, "panel");
+        }
+
+        UpdatePanelChrome();
+    }
+
+    private void StepPanel(int delta)
+    {
+        if (!_panelMode || _lines.Count == 0)
+            return;
+        ShowPanelLine(_panelIndex < 0 ? _lines.Count - 1 : _panelIndex + delta, fromUser: true);
+    }
+
+    private void FollowLive()
+    {
+        if (!_panelMode)
+            return;
+        _followLive = true;
+        ShowPanelLine(_lines.Count - 1, fromUser: true);
+    }
+
+    private void UpdatePanelChrome()
+    {
+        PanelPosition.Text = _lines.Count == 0
+            ? "No captions yet"
+            : _followLive
+                ? $"Live — {_lines.Count} captions"
+                : $"Caption {_panelIndex + 1} of {_lines.Count} — paused";
+
+        // The buttons take their enabled state from the commands' CanExecute.
+        CommandManager.InvalidateRequerySuggested();
+    }
+
     // ---- View toggles ---------------------------------------------------------
     private void ShowTimestamps_Changed(object sender, RoutedEventArgs e)
     {
@@ -717,6 +910,8 @@ public partial class MainWindow : Window
             return;
         foreach (var line in _lines)
             line.ShowTimestamp = ShowTimestamps;
+        if (_panelMode)
+            ShowPanelLine(_panelIndex, fromUser: false); // re-render with/without the stamp
         SetStatus(ShowTimestamps ? "Timestamps shown." : "Timestamps hidden.");
     }
 
@@ -726,7 +921,9 @@ public partial class MainWindow : Window
             return;
         SetStatus(AnnounceCaptions
             ? "New captions will be announced by your screen reader."
-            : "Automatic announcements off. Review captions with the arrow keys in the transcript.");
+            : _panelMode
+                ? "Automatic announcements off. Step through captions with the arrow keys."
+                : "Automatic announcements off. Review captions with the arrow keys in the transcript.");
     }
 
     // ---- Status ---------------------------------------------------------------

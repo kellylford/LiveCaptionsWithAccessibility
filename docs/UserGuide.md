@@ -21,8 +21,28 @@ This guide covers everyday use. For the design and engineering details, see the
 
 ### Install and run
 
-Download the release zip from the project's GitHub Releases page, extract it anywhere,
-and run `AccessibleLiveCaptions.exe`. There is no installer and nothing to configure.
+The Releases page offers two downloads. Both are code-signed.
+
+**`AccessibleLiveCaptions-<version>-win-arm64.msix` — recommended.** This is the full
+app, including the Windows on-device (NPU) engine. Double-click it and choose Install;
+you do **not** need Developer Mode, and there is no certificate to install. It appears in
+the Start menu afterwards and uninstalls from Settings like any other app.
+
+To install it entirely from the keyboard — which avoids the App Installer dialog and
+gives readable error text if anything goes wrong — run in PowerShell:
+
+```powershell
+Add-AppxPackage -Path .\AccessibleLiveCaptions-v0.2.0-win-arm64.msix
+```
+
+**`AccessibleLiveCaptions-<version>-win-arm64-portable.zip`.** No installation: unzip
+anywhere and run `AccessibleLiveCaptions.exe`. Useful from a USB stick or where you can't
+install software. It does not include the Windows on-device (NPU) engine, which Windows
+only permits to installed apps.
+
+The first time you run a downloaded app, Windows SmartScreen may still warn about it
+until the release has been downloaded enough times to establish reputation. Choose
+**More info**, then **Run anyway**.
 
 If you build from source instead: `dotnet run` in the repository root.
 
@@ -176,17 +196,15 @@ English-only, and the underlying Windows API is still in preview.
 Requirements: Windows 11 24H2 or later; a Copilot+ PC for NPU speed (other PCs run the
 same engine on CPU after a one-time model download by Windows Update).
 
-To install it today you build it from source (it cannot ship in the portable zip while
-the API is in preview):
+**To get it: install the `.msix` download** (see section 1), then choose
+Audio ▸ Engine ▸ **Windows on-device — NPU**. Windows only grants access to this engine
+to installed apps, so the portable zip shows the menu item disabled, with the reason in
+its tooltip.
 
-1. Turn on **Developer Mode** (Settings ▸ System ▸ For developers).
-2. From the repository root, run:
-   `powershell -ExecutionPolicy Bypass -File packaging\build-windows-ai.ps1`
-3. Launch **Accessible Live Captions** from the Start menu (the packaged copy), and
-   choose Audio ▸ Engine ▸ **Windows on-device — NPU**.
-
-In the portable version this engine's menu item is absent or disabled, with the reason
-in its tooltip.
+To build it yourself from source instead, turn on **Developer Mode**
+(Settings ▸ System ▸ For developers) and run
+`powershell -ExecutionPolicy Bypass -File packaging\build-windows-ai.ps1`
+from the repository root.
 
 ---
 

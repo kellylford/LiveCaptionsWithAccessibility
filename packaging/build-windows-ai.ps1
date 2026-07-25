@@ -24,20 +24,7 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed." }
 # The manifest must sit at the layout root as AppxManifest.xml.
 Copy-Item (Join-Path $PSScriptRoot "Package.appxmanifest") (Join-Path $publish "AppxManifest.xml") -Force
 
-# Minimal placeholder logos (solid squares) so the manifest validates.
-$assets = Join-Path $publish "Assets"
-New-Item -ItemType Directory -Force $assets | Out-Null
-Add-Type -AssemblyName System.Drawing
-foreach ($spec in @(@{Name = 'StoreLogo.png'; Size = 50 },
-                    @{Name = 'Square44x44Logo.png'; Size = 44 },
-                    @{Name = 'Square150x150Logo.png'; Size = 150 })) {
-    $bmp = New-Object System.Drawing.Bitmap($spec.Size, $spec.Size)
-    $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.Clear([System.Drawing.Color]::FromArgb(255, 0, 90, 158)) # Windows accent blue
-    $g.Dispose()
-    $bmp.Save((Join-Path $assets $spec.Name), [System.Drawing.Imaging.ImageFormat]::Png)
-    $bmp.Dispose()
-}
+Copy-Item (Join-Path $PSScriptRoot "Assets") $publish -Recurse -Force
 
 Write-Host "Registering the package (requires Developer Mode)..." -ForegroundColor Cyan
 Add-AppxPackage -Register (Join-Path $publish "AppxManifest.xml") -ForceUpdateFromAnyVersion

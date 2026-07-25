@@ -15,9 +15,14 @@
   xmlns:systemai="http://schemas.microsoft.com/appx/manifest/systemai/windows10"
   IgnorableNamespaces="uap uap10 rescap systemai">
 
+  <!-- Publisher must be character-identical to the Azure Artifact Signing
+       certificate subject, or signing fails with 0x8007000b. This value is the
+       subject of the kellyford-public profile; it is derived from identity
+       validation and stays stable across certificate renewals. The release
+       workflow stamps Version from the tag but never touches Publisher. -->
   <Identity Name="AccessibleLiveCaptions"
-            Publisher="CN=Kelly Ford"
-            Version="0.1.0.0"
+            Publisher="CN=kelly ford, O=kelly ford, L=Madison, S=wi, C=US"
+            Version="0.2.0.0"
             ProcessorArchitecture="arm64" />
 
   <Properties>

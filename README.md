@@ -38,6 +38,19 @@ Interim ("still deciding") words appear under **Now hearing** but are *not*
 announced on every change — that would flood a screen reader. Only settled lines are
 announced.
 
+## Install
+
+From the [Releases page](https://github.com/kellylford/LiveCaptionsWithAccessibility/releases),
+both downloads code-signed:
+
+| Download | What you get |
+| --- | --- |
+| **`.msix`** | The full app **including the Windows on-device (NPU) engine**. Double-click to install — no Developer Mode, no certificate steps. Keyboard alternative: `Add-AppxPackage -Path .\<file>.msix` |
+| **`-portable.zip`** | Unzip and run; no installation. No NPU engine — Windows grants that only to installed apps. |
+
+Currently **ARM64 (Snapdragon) Windows 11 only** — this is a demonstration build. See
+[the user guide](docs/UserGuide.md) for everything else.
+
 ## Requirements
 
 - Windows 10/11 (built and verified on a Snapdragon X Elite / ARM64 Copilot+ PC)

@@ -1,17 +1,42 @@
 name: Release
 
-# Publishes a GitHub Release when a version tag (v0.1.0, v0.2.0, …) is pushed.
+# Publishes a GitHub Release when a version tag (v0.2.0, v0.3.0, …) is pushed.
 # The tag is the trigger; nothing publishes on an ordinary push to main.
+#
+# Produces two downloads:
+#   * a signed MSIX (win-arm64) — the demo build including the Windows on-device
+#     (NPU) engine. Because it is signed by Azure Artifact Signing, recipients
+#     install it by double-clicking; Developer Mode is NOT required.
+#   * a signed portable zip (win-arm64) — no install, no NPU engine, and runs on
+#     any ARM64 Windows machine.
+#
+# Signing mirrors QuickMail's proven setup: GitHub OIDC → azure/login → Azure
+# Artifact Signing, with no certificate or long-lived secret stored anywhere.
+# It needs three repository secrets — AZURE_CLIENT_ID, AZURE_TENANT_ID,
+# AZURE_SUBSCRIPTION_ID — and an Azure federated credential trusting the subject
+# repo:kellylford/LiveCaptionsWithAccessibility:environment:azure-signing.
+# If the secrets are absent the workflow still publishes, unsigned, and says so.
+
 on:
   push:
     tags: ['v*']
 
 permissions:
-  contents: write  # softprops/action-gh-release needs this to create the release
+  contents: write   # softprops/action-gh-release needs this to create the release
+  id-token: write   # OIDC token azure/login exchanges for Azure credentials
 
 jobs:
   release:
-    runs-on: windows-latest
+    # The signing action runs only on windows-2022/2025 (never on ARM64 runners —
+    # cross-publishing win-arm64 from an x64 runner is fine and is what we do).
+    runs-on: windows-2025
+
+    # Runs in the `azure-signing` environment so the OIDC token's subject is
+    # repo:<owner>/<repo>:environment:azure-signing, which the Azure federated
+    # credential trusts (wildcard tag subjects aren't supported in this tenant).
+    # This is ONLY a claim-matching mechanism, not a deployment gate — do not add
+    # protection rules to this environment or every release will await approval.
+    environment: azure-signing
 
     steps:
       - name: Check out
@@ -35,31 +60,131 @@ jobs:
           }
           Write-Host "Tag $tag matches csproj <Version>."
 
-      # Self-contained so recipients can unzip and run with no .NET install. The csproj
-      # already targets win-arm64 (Snapdragon / Copilot+ PC); a hosted x64 runner
-      # cross-publishes it fine (no ARM execution needed to publish).
-      - name: Publish (self-contained, win-arm64)
+      - name: Decide whether signing is configured
+        id: signing
+        shell: pwsh
+        env:
+          CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        run: |
+          $ok = [bool]$env:CLIENT_ID
+          "enabled=$($ok.ToString().ToLower())" | Out-File $env:GITHUB_OUTPUT -Append
+          if (-not $ok) {
+            Write-Warning "AZURE_CLIENT_ID not set - publishing UNSIGNED artifacts. The MSIX will then only install on machines with Developer Mode enabled."
+          }
+
+      # ---- Portable build (no Windows AI flavor) -----------------------------
+      - name: Publish portable (self-contained, win-arm64)
         run: >
           dotnet publish AccessibleLiveCaptions.csproj
           --configuration Release
           --runtime win-arm64
           --self-contained true
-          --output publish
+          --output publish-portable
 
-      - name: Package
+      # ---- MSIX build (Windows AI flavor: adds the NPU engine) ---------------
+      # WindowsAppSDKSelfContained puts the Windows App SDK runtime inside the
+      # package, so recipients need no separate SDK install.
+      - name: Publish MSIX payload (Windows AI flavor, win-arm64)
+        run: >
+          dotnet publish AccessibleLiveCaptions.csproj
+          --configuration Release
+          --runtime win-arm64
+          --self-contained false
+          -p:WindowsAI=true
+          -p:WindowsAppSDKSelfContained=true
+          --output publish-msix
+
+      - name: Assemble MSIX layout
         shell: pwsh
         run: |
-          $zip = "AccessibleLiveCaptions-${{ github.ref_name }}-win-arm64.zip"
-          Compress-Archive -Path publish/* -DestinationPath $zip -Force
-          "ASSET=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Copy-Item packaging/Assets publish-msix -Recurse -Force
+          $manifest = "publish-msix/AppxManifest.xml"
+          Copy-Item packaging/Package.appxmanifest $manifest -Force
 
-      # Release notes come from docs/release-notes-<tag>.md (e.g. release-notes-v0.1.0.md).
-      # fail_on_unmatched_files makes a missing zip fail the release rather than publish
-      # an empty one.
+          # MSIX requires a four-part version; the tag remains the source of truth.
+          # Publisher is NOT stamped here - it lives in the manifest and must stay
+          # character-identical to the signing certificate's subject (mismatch =
+          # error 0x8007000b at signing time).
+          [xml]$xml = Get-Content $manifest
+          $xml.Package.Identity.Version = '${{ github.ref_name }}'.TrimStart('v') + '.0'
+          $xml.Save((Resolve-Path $manifest))
+          Write-Host "Identity: $($xml.Package.Identity.Name) $($xml.Package.Identity.Version) / $($xml.Package.Identity.Publisher)"
+
+      # azure/login exchanges the workflow OIDC token for Azure credentials; the
+      # signing action then authenticates through that session. No certificate or
+      # long-lived secret is stored.
+      - name: Azure login (code signing)
+        if: steps.signing.outputs.enabled == 'true'
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # Sign the payload executables BEFORE packing, so the portable zip's exe is
+      # trusted and nothing inside the package ships unsigned.
+      - name: Sign application binaries
+        if: steps.signing.outputs.enabled == 'true'
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: https://eus.codesigning.azure.net/
+          signing-account-name: kellylford
+          certificate-profile-name: kellyford-public
+          files: |
+            ${{ github.workspace }}\publish-portable\AccessibleLiveCaptions.exe
+            ${{ github.workspace }}\publish-msix\AccessibleLiveCaptions.exe
+          file-digest: SHA256
+          # Timestamping is required in practice: Artifact Signing certificates are
+          # short-lived, and without a timestamp signatures stop validating in days.
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Pack MSIX
+        shell: pwsh
+        run: |
+          # makeappx ships with the Windows SDK; pick the newest x64 copy on the runner.
+          $makeappx = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter makeappx.exe |
+            Where-Object FullName -like "*\x64\*" |
+            Sort-Object { $_.Directory.Parent.Name } -Descending |
+            Select-Object -First 1
+          if (-not $makeappx) { throw "makeappx.exe not found on the runner." }
+          Write-Host "Using $($makeappx.FullName)"
+
+          $msix = "AccessibleLiveCaptions-${{ github.ref_name }}-win-arm64.msix"
+          & $makeappx.FullName pack /d publish-msix /p $msix /o
+          if ($LASTEXITCODE -ne 0) { throw "makeappx pack failed." }
+          "MSIX=$msix" | Out-File $env:GITHUB_ENV -Append
+
+      # The package signature must be applied AFTER packing: it covers the whole
+      # package, so any later edit to the layout would invalidate it.
+      - name: Sign MSIX package
+        if: steps.signing.outputs.enabled == 'true'
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: https://eus.codesigning.azure.net/
+          signing-account-name: kellylford
+          certificate-profile-name: kellyford-public
+          files: ${{ github.workspace }}\${{ env.MSIX }}
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Package portable zip
+        shell: pwsh
+        run: |
+          $zip = "AccessibleLiveCaptions-${{ github.ref_name }}-win-arm64-portable.zip"
+          Compress-Archive -Path publish-portable/* -DestinationPath $zip -Force
+          "ZIP=$zip" | Out-File $env:GITHUB_ENV -Append
+
+      # Release notes come from docs/release-notes-<tag>.md (e.g. release-notes-v0.2.0.md).
+      # fail_on_unmatched_files makes a missing asset fail the release rather than
+      # publish an incomplete one.
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: Accessible Live Captions ${{ github.ref_name }}
           body_path: docs/release-notes-${{ github.ref_name }}.md
-          files: ${{ env.ASSET }}
+          files: |
+            ${{ env.MSIX }}
+            ${{ env.ZIP }}
           fail_on_unmatched_files: true

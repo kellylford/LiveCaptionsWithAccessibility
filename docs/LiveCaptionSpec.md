@@ -15,7 +15,7 @@
 Windows ships **Live Captions**, but its presentation is hostile to screen-reader and
 low-vision users: it shows only a sliver of text, keeps no reviewable history, is
 effectively invisible to Narrator/NVDA/JAWS, uses tiny fixed text, and can't capture
-one specific app. **Accessible Live Captions** is a small native Windows (WPF/.NET 8)
+one specific app. **Accessible Live Captions** is a small native Windows (WPF/.NET 10)
 app that fixes the *presentation*. It transcribes the microphone or any audio playing on
 the PC, on-device, and puts every finalized line into a full, scrollable,
 keyboard-navigable transcript where each line is its own focusable, screen-reader-readable
@@ -409,7 +409,7 @@ downloaded from `huggingface.co/csukuangfj/sherpa-onnx-nemo-streaming-fast-confo
 
 | File | Responsibility |
 |---|---|
-| `AccessibleLiveCaptions.csproj` | net8.0-windows, WPF, `RuntimeIdentifier=win-arm64`, `<Version>`; refs System.Speech, NAudio, Whisper.net(.Runtime) |
+| `AccessibleLiveCaptions.csproj` | net10.0-windows, WPF, `RuntimeIdentifier=win-arm64`, `<Version>`; refs System.Speech, NAudio, Whisper.net(.Runtime), sherpa-onnx; `-p:WindowsAI=true` switches to net10.0-windows10.0.26100.0 and adds the NPU engine |
 | `app.manifest` | Win 10/11 compat + PerMonitorV2 DPI |
 | `App.xaml(.cs)` | Application entry; `StartupUri=MainWindow.xaml` |
 | `MainWindow.xaml(.cs)` | Accessible UI, commands/shortcuts, menu logic, engine/source wiring, model commands |

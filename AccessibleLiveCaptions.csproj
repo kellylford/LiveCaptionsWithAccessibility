@@ -2,13 +2,13 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <!-- Opt-in Windows AI flavor (-p:WindowsAI=true): adds the experimental
          Microsoft.Windows.AI.Speech engine (NPU-backed, same model as Windows Live
          Captions). Needs a Windows-SDK-versioned TFM for WinRT projections and only
          functions when the app is MSIX-packaged with the systemAIModels capability;
          the default portable build is completely unaffected. -->
-    <TargetFramework Condition="'$(WindowsAI)' == 'true'">net8.0-windows10.0.26100.0</TargetFramework>
+    <TargetFramework Condition="'$(WindowsAI)' == 'true'">net10.0-windows10.0.26100.0</TargetFramework>
     <DefineConstants Condition="'$(WindowsAI)' == 'true'">$(DefineConstants);WINDOWS_AI</DefineConstants>
     <!-- CS8305: "experimental API" notice on every Microsoft.Windows.AI.Speech use — known and accepted. -->
     <NoWarn Condition="'$(WindowsAI)' == 'true'">$(NoWarn);CS8305</NoWarn>
@@ -30,12 +30,12 @@
 
   <ItemGroup>
     <!-- Offline mic-only quick engine -->
-    <PackageReference Include="System.Speech" Version="8.0.0" />
+    <PackageReference Include="System.Speech" Version="10.0.10" />
     <!-- System-audio + microphone capture (WASAPI); pure-managed, works on ARM64 -->
-    <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="NAudio" Version="2.3.0" />
     <!-- On-device high-accuracy speech-to-text; CPU runtime supports win-arm64 -->
-    <PackageReference Include="Whisper.net" Version="1.8.1" />
-    <PackageReference Include="Whisper.net.Runtime" Version="1.8.1" />
+    <PackageReference Include="Whisper.net" Version="1.9.1" />
+    <PackageReference Include="Whisper.net.Runtime" Version="1.9.1" />
     <!-- On-device true-streaming speech-to-text (word-by-word captions); native win-arm64 -->
     <PackageReference Include="org.k2fsa.sherpa.onnx" Version="1.13.4" />
     <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.win-arm64" Version="1.13.4" />

@@ -46,10 +46,10 @@ jobs:
       - name: Check out
         uses: actions/checkout@v4
 
-      - name: Set up .NET 8
+      - name: Set up .NET 10
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: 10.0.x
 
       # On a tag the tag is the single source of truth for the version, and it must
       # match the csproj <Version> so a published build can never mis-report itself.

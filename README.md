@@ -54,7 +54,7 @@ Currently **ARM64 (Snapdragon) Windows 11 only** — this is a demonstration bui
 ## Requirements
 
 - Windows 10/11 (built and verified on a Snapdragon X Elite / ARM64 Copilot+ PC)
-- .NET 8 SDK
+- .NET 10 SDK (only to build from source; the downloads are self-contained)
 - A microphone (for mic mode) — system-audio mode needs no mic
 - For the Windows-speech engine: an installed recognizer language pack (en-US)
 

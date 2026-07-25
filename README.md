@@ -183,6 +183,9 @@ Windows API.
 
 ## Documentation & building
 
+- **[docs/ProjectStatus.md](docs/ProjectStatus.md)** — **start here if you are picking this
+  project up**, or setting it up on a new machine: current state, build and release
+  pipeline, signing setup, fresh-install troubleshooting, and the hardware-specific traps.
 - **[docs/UserGuide.md](docs/UserGuide.md)** — the user guide: keyboard reference, choosing
   sources and engines, screen-reader exclusion, models, troubleshooting.
 - **[docs/LiveCaptionSpec.md](docs/LiveCaptionSpec.md)** — a formal, build-it-again specification: the design

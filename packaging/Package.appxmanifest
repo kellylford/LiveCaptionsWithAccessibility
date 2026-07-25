@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <!--
   Manifest for the Windows AI flavor (see packaging/build-windows-ai.ps1).
 
@@ -22,7 +22,7 @@
        workflow stamps Version from the tag but never touches Publisher. -->
   <Identity Name="AccessibleLiveCaptions"
             Publisher="CN=kelly ford, O=kelly ford, L=Madison, S=wi, C=US"
-            Version="0.2.0.0"
+            Version="0.3.0.0"
             ProcessorArchitecture="arm64" />
 
   <Properties>

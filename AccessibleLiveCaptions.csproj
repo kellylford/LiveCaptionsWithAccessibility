@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -10,7 +10,7 @@
          the default portable build is completely unaffected. -->
     <TargetFramework Condition="'$(WindowsAI)' == 'true'">net10.0-windows10.0.26100.0</TargetFramework>
     <DefineConstants Condition="'$(WindowsAI)' == 'true'">$(DefineConstants);WINDOWS_AI</DefineConstants>
-    <!-- CS8305: "experimental API" notice on every Microsoft.Windows.AI.Speech use — known and accepted. -->
+    <!-- CS8305: "experimental API" notice on every Microsoft.Windows.AI.Speech use â€” known and accepted. -->
     <NoWarn Condition="'$(WindowsAI)' == 'true'">$(NoWarn);CS8305</NoWarn>
     <RuntimeIdentifier>win-arm64</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
@@ -23,9 +23,9 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
 
     <!-- The release workflow verifies the pushed v* tag matches <Version>. -->
-    <Version>0.2.0</Version>
-    <AssemblyVersion>0.2.0</AssemblyVersion>
-    <FileVersion>0.2.0</FileVersion>
+    <Version>0.3.0</Version>
+    <AssemblyVersion>0.3.0</AssemblyVersion>
+    <FileVersion>0.3.0</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -43,7 +43,7 @@
 
   <ItemGroup Condition="'$(WindowsAI)' == 'true'">
     <!-- Windows AI Speech Recognition (experimental): the OS on-device recognizer,
-         NPU-accelerated on Copilot+ PCs. Granular packages — no WinUI dependency. -->
+         NPU-accelerated on Copilot+ PCs. Granular packages â€” no WinUI dependency. -->
     <PackageReference Include="Microsoft.WindowsAppSDK.AI" Version="2.2.6-experimental" />
   </ItemGroup>
 

@@ -1,8 +1,8 @@
-# Accessible Live Captions — User Guide
+﻿# Accessible Live Captions â€” User Guide
 
 Accessible Live Captions turns speech on your PC into a **full, reviewable transcript**
 that works properly with screen readers and low vision. It captions your microphone or
-anything playing on the computer — a meeting, a video, one specific app — entirely
+anything playing on the computer â€” a meeting, a video, one specific app â€” entirely
 **on-device**: no cloud, no account, no audio ever leaves your PC.
 
 This guide covers everyday use. For the design and engineering details, see the
@@ -23,16 +23,16 @@ This guide covers everyday use. For the design and engineering details, see the
 
 The Releases page offers two downloads. Both are code-signed.
 
-**`AccessibleLiveCaptions-<version>-win-arm64.msix` — recommended.** This is the full
+**`AccessibleLiveCaptions-<version>-win-arm64.msix` â€” recommended.** This is the full
 app, including the Windows on-device (NPU) engine. Double-click it and choose Install;
 you do **not** need Developer Mode, and there is no certificate to install. It appears in
 the Start menu afterwards and uninstalls from Settings like any other app.
 
-To install it entirely from the keyboard — which avoids the App Installer dialog and
-gives readable error text if anything goes wrong — run in PowerShell:
+To install it entirely from the keyboard â€” which avoids the App Installer dialog and
+gives readable error text if anything goes wrong â€” run in PowerShell:
 
 ```powershell
-Add-AppxPackage -Path .\AccessibleLiveCaptions-v0.2.0-win-arm64.msix
+Add-AppxPackage -Path .\AccessibleLiveCaptions-v0.3.0-win-arm64.msix
 ```
 
 **`AccessibleLiveCaptions-<version>-win-arm64-portable.zip`.** No installation: unzip
@@ -52,7 +52,7 @@ If you build from source instead: `dotnet run` in the repository root.
    "Ready. Press Start listening (Control R) to begin."
 2. Press **Ctrl+R**. The first time, the status line reports the model download and
    load progress; then it announces "Listening."
-3. Play some audio — a video, a meeting, anything. Finished sentences are added to the
+3. Play some audio â€” a video, a meeting, anything. Finished sentences are added to the
    transcript and (by default) spoken by your screen reader; the in-progress guess
    appears under "Now hearing" without being spoken.
 
@@ -64,14 +64,14 @@ Press **Ctrl+R** again to stop.
 
 From top to bottom:
 
-- **Menu bar** — Captions, Audio, and View menus. Reach it with `Alt` or `F10`; navigate
+- **Menu bar** â€” Captions, Audio, and View menus. Reach it with `Alt` or `F10`; navigate
   with the arrow keys. It is not in the Tab order.
-- **Transcript** — the main area and the only focusable control. Every finalized caption
+- **Transcript** â€” the main area and the only focusable control. Every finalized caption
   is one list item; review with the arrow keys at your own pace. New lines never steal
   focus while you are reviewing.
-- **Now hearing** — the live, still-changing guess for the current sentence. Shown, never
+- **Now hearing** â€” the live, still-changing guess for the current sentence. Shown, never
   announced, so your screen reader is not flooded with half-words.
-- **Status line** — a live region that reports state changes ("Listening.", download
+- **Status line** â€” a live region that reports state changes ("Listening.", download
   progress, errors). Important messages are announced immediately.
 
 ## 3. Keyboard reference
@@ -79,10 +79,10 @@ From top to bottom:
 | Action | Key |
 | --- | --- |
 | Start / stop listening | `Ctrl+R` |
-| Review transcript lines | `↑` `↓` `Home` `End` |
+| Review transcript lines | `â†‘` `â†“` `Home` `End` |
 | Open the menu bar | `Alt` or `F10` |
 | Toggle announcements of new captions | `F8` |
-| Larger / smaller caption text | `Ctrl` `+` / `Ctrl` `−` |
+| Larger / smaller caption text | `Ctrl` `+` / `Ctrl` `âˆ’` |
 | Copy the whole transcript | `Ctrl+Shift+C` |
 | Save the transcript to a text file | `Ctrl+S` |
 | Clear the transcript | `Ctrl+L` |
@@ -92,26 +92,26 @@ live on the menus.
 
 ---
 
-## 4. Choosing what to caption (Audio ▸ Source)
+## 4. Choosing what to caption (Audio â–¸ Source)
 
 | Source | What you get |
 | --- | --- |
-| **System audio (what you hear)** — default | Everything the PC plays: meetings, videos, any app |
+| **System audio (what you hear)** â€” default | Everything the PC plays: meetings, videos, any app |
 | **Microphone** | You, or people in the room |
 
-### Captioning a single app (Audio ▸ Application)
+### Captioning a single app (Audio â–¸ Application)
 
-With System audio selected, the **Application** submenu lists running apps — apps
-currently playing audio are listed first and marked "— playing". Pick one to caption
+With System audio selected, the **Application** submenu lists running apps â€” apps
+currently playing audio are listed first and marked "â€” playing". Pick one to caption
 only that app (and its child processes); pick "(All system audio)" to go back to the
 whole mix. The list refreshes every time the submenu opens.
 
-This is the cleanest way to caption a meeting: nothing else on the system — music,
-notification sounds, other tabs — can bleed into the transcript.
+This is the cleanest way to caption a meeting: nothing else on the system â€” music,
+notification sounds, other tabs â€” can bleed into the transcript.
 
-### Excluding your screen reader (Audio ▸ Exclude screen reader speech)
+### Excluding your screen reader (Audio â–¸ Exclude screen reader speech)
 
-If you use a screen reader, its voice is part of "what you hear" — so whole-mix
+If you use a screen reader, its voice is part of "what you hear" â€” so whole-mix
 captioning would normally interleave the meeting's captions with your screen reader's
 narration, including its announcements of the captions themselves.
 
@@ -123,21 +123,21 @@ Notes:
 
 - It applies only to "(All system audio)". When you caption a single app the toggle is
   disabled, because that app's audio never contains your reader anyway.
-- One screen reader is excluded — the first found, preferring NVDA/JAWS over Narrator.
+- One screen reader is excluded â€” the first found, preferring NVDA/JAWS over Narrator.
 - If you restart your screen reader while listening, press `Ctrl+R` twice (stop, start)
   so the exclusion picks up the reader's new process.
 
 ---
 
-## 5. Choosing an engine (Audio ▸ Engine)
+## 5. Choosing an engine (Audio â–¸ Engine)
 
 All engines run entirely on your PC. They differ in how fast words appear, how the text
 is formatted, and what they can listen to.
 
 | Engine | Words appear | Text style | Sources | Download |
 | --- | --- | --- | --- | --- |
-| **Whisper** (default) | After each phrase (~1 s behind) | Punctuation and casing | Mic + system | 75 MB – 2.9 GB (model choice) |
-| **Streaming** | Word by word (~½ s behind) | Lowercase, no punctuation | Mic + system | 456 MB once |
+| **Whisper** (default) | After each phrase (~1 s behind) | Punctuation and casing | Mic + system | 75 MB â€“ 2.9 GB (model choice) |
+| **Streaming** | Word by word (~Â½ s behind) | Lowercase, no punctuation | Mic + system | 456 MB once |
 | **Windows on-device (NPU)** | After each phrase, fast | Punctuation and casing | Mic + system | None (model ships with Windows) |
 | **Windows speech (SAPI)** | Word by word, instant | Plain | **Mic only** | None |
 
@@ -145,14 +145,14 @@ Recommendations:
 
 - **Want the words as fast as possible** (following a fast conversation): **Streaming**.
   You trade punctuation for the lowest delay and very light CPU use.
-- **Want the nicest transcript to review or save**: **Whisper** — pick a larger model
-  under Audio ▸ Whisper model if your machine keeps up (see below).
+- **Want the nicest transcript to review or save**: **Whisper** â€” pick a larger model
+  under Audio â–¸ Whisper model if your machine keeps up (see below).
 - **On a Copilot+ PC with the packaged version installed**: **Windows on-device** is the
-  best of both — punctuated text, fast, and it runs on the NPU so it uses essentially no
+  best of both â€” punctuated text, fast, and it runs on the NPU so it uses essentially no
   CPU or battery. See section 8.
 - **No downloads, right now, mic only**: Windows speech.
 
-### Whisper model choice (Audio ▸ Whisper model)
+### Whisper model choice (Audio â–¸ Whisper model)
 
 Applies to the Whisper engine only. Tiny and Base are fast; Small is noticeably more
 accurate and still real-time on a Snapdragon X; Medium and above trade lag for accuracy.
@@ -160,9 +160,9 @@ Each model downloads once, on first use.
 
 ### Managing downloads
 
-- **Audio ▸ Download all models** fetches every Whisper model plus the Streaming model
-  (about 7.5 GB total) — useful before going offline.
-- **Audio ▸ Clear downloaded models** deletes them all. Models live in
+- **Audio â–¸ Download all models** fetches every Whisper model plus the Streaming model
+  (about 7.5 GB total) â€” useful before going offline.
+- **Audio â–¸ Clear downloaded models** deletes them all. Models live in
   `%LOCALAPPDATA%\AccessibleLiveCaptions\models`.
 
 ---
@@ -170,9 +170,9 @@ Each model downloads once, on first use.
 ## 6. Announcements, text size, timestamps (View menu)
 
 - **Announce new captions** (`F8`, on by default): each finalized line is spoken once,
-  in order, via UI Automation notifications — no focus stealing. Turn it off to read
+  in order, via UI Automation notifications â€” no focus stealing. Turn it off to read
   the transcript yourself; captions keep accumulating silently.
-- **Larger / smaller text** (`Ctrl +` / `Ctrl −`): caption text from 14 to 48 points.
+- **Larger / smaller text** (`Ctrl +` / `Ctrl âˆ’`): caption text from 14 to 48 points.
   The app uses your system colors, so High Contrast themes apply automatically.
 - **Show timestamps**: prefixes each line with `[HH:mm:ss]`, and includes timestamps
   when you save or copy.
@@ -189,20 +189,20 @@ Each model downloads once, on first use.
 
 The packaged (MSIX) version of the app adds a fourth engine: the same on-device
 recognizer Windows uses for its own Live Captions, exposed through the Windows AI
-Speech API. On Copilot+ PCs it runs on the NPU — captions cost essentially no CPU or
-battery — and its output has full punctuation and casing. It is currently
+Speech API. On Copilot+ PCs it runs on the NPU â€” captions cost essentially no CPU or
+battery â€” and its output has full punctuation and casing. It is currently
 English-only, and the underlying Windows API is still in preview.
 
 Requirements: Windows 11 24H2 or later; a Copilot+ PC for NPU speed (other PCs run the
 same engine on CPU after a one-time model download by Windows Update).
 
 **To get it: install the `.msix` download** (see section 1), then choose
-Audio ▸ Engine ▸ **Windows on-device — NPU**. Windows only grants access to this engine
+Audio â–¸ Engine â–¸ **Windows on-device â€” NPU**. Windows only grants access to this engine
 to installed apps, so the portable zip shows the menu item disabled, with the reason in
 its tooltip.
 
 To build it yourself from source instead, turn on **Developer Mode**
-(Settings ▸ System ▸ For developers) and run
+(Settings â–¸ System â–¸ For developers) and run
 `powershell -ExecutionPolicy Bypass -File packaging\build-windows-ai.ps1`
 from the repository root.
 
@@ -211,14 +211,14 @@ from the repository root.
 ## 9. Troubleshooting
 
 **No captions appear.**
-Check the status line first — it says what the app is doing. Then check the source:
+Check the status line first â€” it says what the app is doing. Then check the source:
 for System audio, something must actually be playing; for a specific app under
-Audio ▸ Application, that app must be the one making sound. If your screen reader's
+Audio â–¸ Application, that app must be the one making sound. If your screen reader's
 speech is the only audio playing, remember it is excluded by default.
 
 **"Now hearing" updates but lines never move into the transcript.**
 Lines finalize after a short silence. Continuous audio (music under speech, back-to-back
-talk) can delay finalization; Whisper and Streaming both force a line after ~12–15 s.
+talk) can delay finalization; Whisper and Streaming both force a line after ~12â€“15 s.
 
 **The first start takes a while.**
 The Whisper/Streaming engines download their model on first use (the status line reports
@@ -228,13 +228,13 @@ progress), then load it into memory. Later starts skip the download.
 You are probably offline. Windows speech (SAPI) works with no download, microphone only.
 
 **Captions contain my screen reader's speech.**
-Audio ▸ **Exclude screen reader speech** should be checked. If you restarted your reader
+Audio â–¸ **Exclude screen reader speech** should be checked. If you restarted your reader
 mid-session, stop and start listening again. Only one reader is excluded at a time.
 
 **The app announced that my audio device does not support excluding the screen reader.**
 Some audio devices (seen with certain "Hi-Res" headphone outputs) render audio in a way
 Windows' per-process capture cannot tap. The app detects this within a few seconds,
-turns exclusion off, and keeps captioning everything — including your reader's speech.
+turns exclusion off, and keeps captioning everything â€” including your reader's speech.
 Per-application capture has the same limitation on such devices, and the app announces
 that too. To get exclusion or per-app capture back, switch Windows' default output to a
 different device (for example the built-in speakers) and restart listening.

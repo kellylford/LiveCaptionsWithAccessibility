@@ -12,7 +12,11 @@
     <DefineConstants Condition="'$(WindowsAI)' == 'true'">$(DefineConstants);WINDOWS_AI</DefineConstants>
     <!-- CS8305: "experimental API" notice on every Microsoft.Windows.AI.Speech use â€” known and accepted. -->
     <NoWarn Condition="'$(WindowsAI)' == 'true'">$(NoWarn);CS8305</NoWarn>
-    <RuntimeIdentifier>win-arm64</RuntimeIdentifier>
+    <!-- win-arm64 is the default and the only fully verified target. Override with
+         "dotnet publish -r win-x64" (or -p:RuntimeIdentifier=win-x64) for the
+         experimental x64 build; the sherpa native runtime package below follows this
+         value, which is the only thing that actually has to change per architecture. -->
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-arm64</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
     <UseWPF>true</UseWPF>
     <Nullable>enable</Nullable>
@@ -23,9 +27,9 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
 
     <!-- The release workflow verifies the pushed v* tag matches <Version>. -->
-    <Version>0.4.0</Version>
-    <AssemblyVersion>0.4.0</AssemblyVersion>
-    <FileVersion>0.4.0</FileVersion>
+    <Version>0.5.0</Version>
+    <AssemblyVersion>0.5.0</AssemblyVersion>
+    <FileVersion>0.5.0</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -36,9 +40,11 @@
     <!-- On-device high-accuracy speech-to-text; CPU runtime supports win-arm64 -->
     <PackageReference Include="Whisper.net" Version="1.9.1" />
     <PackageReference Include="Whisper.net.Runtime" Version="1.9.1" />
-    <!-- On-device true-streaming speech-to-text (word-by-word captions); native win-arm64 -->
+    <!-- On-device true-streaming speech-to-text (word-by-word captions). The native
+         runtime is architecture-pinned, so the package name tracks $(RuntimeIdentifier):
+         org.k2fsa.sherpa.onnx.runtime.win-arm64 / ...win-x64. -->
     <PackageReference Include="org.k2fsa.sherpa.onnx" Version="1.13.4" />
-    <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.win-arm64" Version="1.13.4" />
+    <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.$(RuntimeIdentifier)" Version="1.13.4" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(WindowsAI)' == 'true'">

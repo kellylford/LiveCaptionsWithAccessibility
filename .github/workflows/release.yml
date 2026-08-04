@@ -3,12 +3,15 @@ name: Release
 # Publishes a GitHub Release when a version tag (v0.2.0, v0.3.0, …) is pushed.
 # The tag is the trigger; nothing publishes on an ordinary push to main.
 #
-# Produces two downloads:
+# Produces three downloads:
 #   * a signed MSIX (win-arm64) — the demo build including the Windows on-device
 #     (NPU) engine. Because it is signed by Azure Artifact Signing, recipients
 #     install it by double-clicking; Developer Mode is NOT required.
 #   * a signed portable zip (win-arm64) — no install, no NPU engine, and runs on
 #     any ARM64 Windows machine.
+#   * a signed portable zip (win-x64) — EXPERIMENTAL and unverified: no x64
+#     machine exists to test it on, so it is built, architecture-checked, and
+#     signed by CI but never smoke-tested. There is deliberately no x64 MSIX.
 #
 # Signing mirrors QuickMail's proven setup: GitHub OIDC → azure/login → Azure
 # Artifact Signing, with no certificate or long-lived secret stored anywhere.
@@ -92,6 +95,20 @@ jobs:
           --self-contained true
           --output publish-portable
 
+      # ---- Experimental x64 portable -----------------------------------------
+      # Only the sherpa native runtime package is architecture-pinned; it tracks
+      # $(RuntimeIdentifier) in the csproj, so the RID switch is the whole change.
+      # UNVERIFIED ON REAL HARDWARE - no x64 Copilot+ machine exists to test on.
+      # No MSIX for x64: the NPU engine would need packaging that cannot be
+      # validated here, and shipping an untestable installer is worse than none.
+      - name: Publish portable (self-contained, win-x64, experimental)
+        run: >
+          dotnet publish AccessibleLiveCaptions.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          --output publish-portable-x64
+
       # ---- MSIX build (Windows AI flavor: adds the NPU engine) ---------------
       # WindowsAppSDKSelfContained puts the Windows App SDK runtime inside the
       # package, so recipients need no separate SDK install.
@@ -143,6 +160,7 @@ jobs:
           certificate-profile-name: kellyford-public
           files: |
             ${{ github.workspace }}\publish-portable\AccessibleLiveCaptions.exe
+            ${{ github.workspace }}\publish-portable-x64\AccessibleLiveCaptions.exe
             ${{ github.workspace }}\publish-msix\AccessibleLiveCaptions.exe
           file-digest: SHA256
           # Timestamping is required in practice: Artifact Signing certificates are
@@ -180,25 +198,55 @@ jobs:
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
 
-      - name: Package portable zip
+      - name: Package portable zips
         shell: pwsh
         run: |
           $zip = "AccessibleLiveCaptions-v${{ steps.version.outputs.version }}-win-arm64-portable.zip"
           Compress-Archive -Path publish-portable/* -DestinationPath $zip -Force
           "ZIP=$zip" | Out-File $env:GITHUB_ENV -Append
 
+          $zip64 = "AccessibleLiveCaptions-v${{ steps.version.outputs.version }}-win-x64-portable-EXPERIMENTAL.zip"
+          Compress-Archive -Path publish-portable-x64/* -DestinationPath $zip64 -Force
+          "ZIP_X64=$zip64" | Out-File $env:GITHUB_ENV -Append
+
       # Report what the signature actually says, so a dry run proves signing end to
       # end rather than merely not failing.
       - name: Verify signatures
         shell: pwsh
         run: |
-          foreach ($f in @($env:MSIX, $env:ZIP_EXE)) {
+          foreach ($f in @($env:MSIX, $env:ZIP_EXE, $env:ZIP_EXE_X64)) {
             if (-not $f) { continue }
             $sig = Get-AuthenticodeSignature $f
             Write-Host "$f`n  status:  $($sig.Status)`n  subject: $($sig.SignerCertificate.Subject)"
           }
         env:
           ZIP_EXE: publish-portable\AccessibleLiveCaptions.exe
+          ZIP_EXE_X64: publish-portable-x64\AccessibleLiveCaptions.exe
+
+      # The x64 flavor differs from arm64 by one MSBuild property, so a typo would
+      # silently ship arm64 binaries in an "x64" zip. Assert the PE machine type of
+      # the apphost and of the architecture-pinned sherpa native instead of trusting it.
+      - name: Verify architecture of each portable build
+        shell: pwsh
+        run: |
+          function Get-PEMachine($p) {
+            $fs = [IO.File]::OpenRead($p); $br = New-Object IO.BinaryReader($fs)
+            $fs.Position = 0x3C; $off = $br.ReadInt32(); $fs.Position = $off + 4
+            $m = $br.ReadUInt16(); $br.Close()
+            switch ($m) { 0x8664 {'x64'} 0xAA64 {'ARM64'} 0x14C {'x86'} default {'0x{0:X}' -f $m} }
+          }
+          $expect = @{ 'publish-portable' = 'ARM64'; 'publish-portable-x64' = 'x64' }
+          foreach ($dir in $expect.Keys) {
+            foreach ($f in @('AccessibleLiveCaptions.exe','sherpa-onnx-c-api.dll','onnxruntime.dll')) {
+              $path = Join-Path $dir $f
+              if (-not (Test-Path $path)) { throw "$path is missing from the publish output." }
+              $actual = Get-PEMachine $path
+              Write-Host ("{0,-24} {1,-24} {2}" -f $dir, $f, $actual)
+              if ($actual -ne $expect[$dir]) {
+                throw "$path is $actual but $dir must be $($expect[$dir])."
+              }
+            }
+          }
 
       # Manual runs stop here: the artifacts are attached to the run for inspection
       # and nothing is published.
@@ -210,6 +258,7 @@ jobs:
           path: |
             ${{ env.MSIX }}
             ${{ env.ZIP }}
+            ${{ env.ZIP_X64 }}
           if-no-files-found: error
           retention-days: 14
 
@@ -225,4 +274,5 @@ jobs:
           files: |
             ${{ env.MSIX }}
             ${{ env.ZIP }}
+            ${{ env.ZIP_X64 }}
           fail_on_unmatched_files: true

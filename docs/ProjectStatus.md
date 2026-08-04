@@ -30,7 +30,7 @@ Microsoft — it is a proof that this is straightforward on a Copilot+ PC today.
 | Repo | `kellylford/LiveCaptionsWithAccessibility` |
 | Current release | **v0.4.0** — signed MSIX + signed portable zip |
 | Runtime | **.NET 10 LTS** (built with SDK 10.0.302) |
-| Architecture | **win-arm64 only** — see §7, this matters a lot |
+| Architecture | **win-arm64 verified**; win-x64 built but never run on real hardware — see §7 and §8.1 |
 | UI | WPF, single window, menu-bar driven; two presentations (transcript / panel) |
 | Engines | 4 (see §4) |
 | Code signing | Azure Artifact Signing via GitHub OIDC — working, verified |
@@ -260,6 +260,39 @@ reader speech* is on by default for this reason. When testing, remember that any
 JAWS/NVDA says will otherwise end up in the transcript — including the app's own
 caption announcements, which is a feedback loop.
 
+### 8.1 Do not run the x64 build under ARM64 emulation
+
+Windows on ARM will happily launch the win-x64 build under x64 emulation. **Don't.**
+
+Tried once on the reference machine (Snapdragon X Elite, build 26300) at v0.5.0: the
+emulated app launched fine, the window came up, and the accessibility tree was correct
+(UIA reported the `Transcript` list with 8 focusable seeded items). Minutes later the
+machine hung hard and reset. The event log shows Kernel-Power **142** — *"the system
+stopped responding and the hardware watchdog triggered a system reset"* — with
+`BugcheckCode 0` and **no crash dump**, i.e. a hardware watchdog reset rather than a
+software bugcheck. There is no dump, so **causation was never proven**, and two facts
+argue against blaming the app directly:
+
+- A user-mode process cannot trigger a hardware watchdog reset on its own; that takes a
+  kernel driver or firmware hang.
+- The same machine had already logged a LiveKernelEvent
+  `LKD_0x141_Tdr:6_IMAGE_qcdxkm8380.sys` — a GPU TDR in the Qualcomm Adreno display
+  driver — about 15 hours earlier, with nothing of this project running.
+
+The plausible reading is the emulation layer driving WPF rendering through a Qualcomm
+display driver that was already unstable that day. Either way the combination is not a
+scenario anyone needs: **ARM64 machines have an ARM64 build.** The x64 artifact exists
+only for Intel/AMD hardware, where no emulation layer is involved.
+
+Diagnostic recipe if it happens again — the useful signal is the *absence* of a
+bugcheck, and note that event 6008's "previous shutdown at ..." time lags the real hang
+by minutes because it reports the last flushed clock value:
+
+```powershell
+Get-WinEvent -FilterHashtable @{LogName='System'; Id=41,142,1001,6008} -MaxEvents 20 |
+  Select-Object TimeCreated, Id, @{n='M';e={($_.Message -split "`n")[0]}}
+```
+
 ## 9. Verified vs. not
 
 Verified on the reference machine at v0.3.0, on .NET 10:
@@ -284,16 +317,25 @@ Added at v0.4.0, verified on a second machine (Surface Laptop 7, X1E80100, build
 Not verified:
 
 - **The SAPI engine** — not separately exercised on .NET 10 (thin wrapper over the OS recognizer, no native assets of its own)
-- **Any non-ARM64 machine** — no x64 build exists
+- **The x64 build (v0.5.0+)** — CI builds it and asserts the PE machine type of the
+  apphost and the sherpa/onnxruntime natives, so the *artifact* is known to be genuinely
+  x64. Nothing about its *behavior* is known: no audio capture, no recognition, no
+  startup on real hardware. The only run ever attempted was under ARM64 emulation
+  (§8.1), which is not a supported configuration. A single report from a real Intel or
+  AMD machine would settle it.
 - **Any machine other than the reference Snapdragon X Elite** — this is precisely what a second Copilot+ PC would establish
 
 ## 10. Open items
 
-1. **x64 support.** Today every Intel/AMD visitor hits a dead end. An x64 build was
-   proven to work: it needs `RuntimeIdentifier` parameterized and the
-   architecture-pinned native package followed along — `org.k2fsa.sherpa.onnx.runtime.win-arm64`
-   must become `...win-x64` for x64 (a `$(RuntimeIdentifier)`-substituted reference
-   works). Then matrix the release workflow. Whisper.net and NAudio are fine.
+1. **x64 support — half done as of v0.5.0.** `RuntimeIdentifier` is parameterized and
+   the architecture-pinned native reference is now
+   `org.k2fsa.sherpa.onnx.runtime.$(RuntimeIdentifier)`, which was the whole build-side
+   change; Whisper.net and NAudio needed nothing. The release workflow ships a signed
+   x64 portable zip with a PE-machine-type assertion on both flavors. **What remains is
+   validation, not engineering:** nobody has run it on Intel or AMD hardware (§9). Until
+   someone does, it stays labeled experimental. An x64 MSIX is deliberately not built —
+   the NPU engine cannot be exercised without a Copilot+ x64 machine, and an untestable
+   installer is worse than none.
 2. **Punctuation for the Streaming engine** — sherpa-onnx offers an online punctuation
    model that would remove its main drawback.
 3. **Ship the NPU engine in the default build** once `Microsoft.Windows.AI.Speech`

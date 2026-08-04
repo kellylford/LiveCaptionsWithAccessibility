@@ -38,8 +38,12 @@ are no-ops when unset:
 For the packaged (MSIX) app set these as **User**-scope env vars — the shell activates it,
 so it does not inherit a parent process's environment.
 
-Targets **win-arm64 only** (`RuntimeIdentifier` is hardcoded in the csproj). Nothing here
-runs on x64 yet; see ProjectStatus §10 for what parameterizing it requires.
+`RuntimeIdentifier` defaults to **win-arm64**, which is the only architecture anything has
+been verified on. `dotnet publish -r win-x64` produces an **experimental, untested** x64
+build — the sherpa native runtime package name tracks `$(RuntimeIdentifier)`, which is the
+only thing that has to vary per architecture. Since v0.5.0 the release workflow ships an
+x64 portable zip alongside the ARM64 artifacts; there is deliberately no x64 MSIX. **Do not
+run the x64 build on an ARM64 machine** — see ProjectStatus §8.
 
 ## The two seams
 
